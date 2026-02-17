@@ -9,10 +9,13 @@ import ChannelListView from './views/ChannelList';
 import PlayerView from './views/PlayerView';
 import LinkModal from './components/LinkModal';
 import FloatingPlayer from './components/FloatingPlayer';
+import AboutView from './views/AboutView';
+import PrivacyPolicyView from './views/PrivacyPolicyView';
 import { CATEGORIES } from './constants';
 import { WifiOff, RefreshCw } from 'lucide-react';
 
 const DEFAULT_M3U = 'https://raw.githubusercontent.com/FunctionError/PiratesTv/refs/heads/main/combined_playlist.m3u';
+const MASTER_JSON_URL = 'https://raw.githubusercontent.com/FunctionError/PiratesTv/refs/heads/main/master_playlists.json';
 
 const App: React.FC = () => {
   const [activeView, setActiveView] = useState<View>('live-events');
@@ -24,10 +27,12 @@ const App: React.FC = () => {
   const [categoryChannels, setCategoryChannels] = useState<Channel[]>([]);
   const [playlistCache, setPlaylistCache] = useState<Record<string, Channel[]>>({});
   
-  // Feature States
   const [favorites, setFavorites] = useState<Channel[]>([]);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   
+  const [cloudCategories, setCloudCategories] = useState<Category[]>([]);
+  const [customCategories, setCustomCategories] = useState<Category[]>([]);
+
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [floatingMatch, setFloatingMatch] = useState<Match | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
@@ -37,11 +42,14 @@ const App: React.FC = () => {
   const [isCategoryLoading, setIsCategoryLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // --- FAVORITES LOGIC ---
   useEffect(() => {
     const savedFavs = localStorage.getItem('cricpk_favorites');
     if (savedFavs) {
-      try { setFavorites(JSON.parse(savedFavs)); } catch (e) { console.error(e); }
+      try { setFavorites(JSON.parse(savedFavs)); } catch (e) {}
+    }
+    const savedCustom = localStorage.getItem('cricpk_custom_playlists');
+    if (savedCustom) {
+      try { setCustomCategories(JSON.parse(savedCustom)); } catch (e) {}
     }
   }, []);
 
@@ -54,7 +62,19 @@ const App: React.FC = () => {
     });
   };
 
-  // --- FETCHING LOGIC ---
+  const handleAddCustomPlaylist = (name: string, url: string) => {
+    const newCat: Category = { id: `custom-${Date.now()}`, name, playlistUrl: url };
+    const updated = [...customCategories, newCat];
+    setCustomCategories(updated);
+    localStorage.setItem('cricpk_custom_playlists', JSON.stringify(updated));
+  };
+
+  const handleDeleteCustomPlaylist = (id: string) => {
+    const updated = customCategories.filter(c => c.id !== id);
+    setCustomCategories(updated);
+    localStorage.setItem('cricpk_custom_playlists', JSON.stringify(updated));
+  };
+
   const safeFetch = async (url: string) => {
     // @ts-ignore
     const p = window.puter;
@@ -62,9 +82,7 @@ const App: React.FC = () => {
       try {
         if (p.http && typeof p.http.fetch === 'function') return await p.http.fetch(url);
         if (typeof p.fetch === 'function') return await p.fetch(url);
-      } catch (e) {
-        console.warn("Puter fetch attempt failed, falling back to native fetch", e);
-      }
+      } catch (e) { }
     }
     return await fetch(url);
   };
@@ -76,14 +94,20 @@ const App: React.FC = () => {
       const response = await safeFetch(DEFAULT_M3U);
       if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
       const text = await response.text();
-      if (!text || text.trim().length === 0) throw new Error("Empty playlist received");
-
       const parsed = parseM3U(text, 'cat-combined');
       setMatches(parsed.matches);
       setAllChannels(parsed.channels);
       setPlaylistCache({ 'cat-combined': parsed.channels });
+
+      try {
+        const cloudRes = await safeFetch(MASTER_JSON_URL);
+        if (cloudRes.ok) {
+          const cloudData = await cloudRes.json();
+          setCloudCategories(cloudData);
+        }
+      } catch (e) { console.log("Cloud master not found or empty yet."); }
+
     } catch (error: any) {
-      console.error("Initial Fetch Error:", error);
       setFetchError(error.message || "Broadcaster synchronization failed.");
     } finally {
       setIsLoading(false);
@@ -144,12 +168,10 @@ const App: React.FC = () => {
     return { channels, matches };
   };
 
-  // --- EVENT HANDLERS ---
   const handleCategorySelect = async (category: Category) => {
     setSelectedCategory(category);
     setActiveView('channel-detail');
     
-    // Intercept Favorites
     if (category.id === 'cat-favorites') {
       setCategoryChannels(favorites);
       return;
@@ -187,111 +209,46 @@ const App: React.FC = () => {
 
   const playChannel = (ch: Channel) => {
     const matchData: Match = {
-      id: ch.id,
-      team1: ch.name,
-      team2: 'Network Mirror',
-      team1Logo: ch.logo,
-      team2Logo: ch.logo,
-      league: selectedCategory?.name || 'Live TV',
-      status: 'Live',
-      time: 'Live',
-      sport: 'Other',
-      streamUrl: ch.streamUrl
+      id: ch.id, team1: ch.name, team2: 'Network Mirror', team1Logo: ch.logo, team2Logo: ch.logo,
+      league: selectedCategory?.name || 'Live TV', status: 'Live', time: 'Live', sport: 'Other', streamUrl: ch.streamUrl
     };
     setSelectedMatch(matchData);
     setFloatingMatch(null);
     setActiveView('player');
   };
 
-  // --- RENDER LOGIC ---
   const renderView = () => {
-    if (isLoading) {
-      return (
-        <div className="flex flex-col items-center justify-center h-full gap-4 text-gray-500">
-          <div className="w-10 h-10 border-4 border-green-500/20 border-t-green-500 rounded-full animate-spin" />
-          <p className="text-[10px] font-black uppercase tracking-[3px] animate-pulse">Scanning Broadcasters...</p>
-        </div>
-      );
-    }
+    if (isLoading) return <div className="flex flex-col items-center justify-center h-full gap-4"><div className="w-10 h-10 border-4 border-green-500/20 border-t-green-500 rounded-full animate-spin" /></div>;
+    if (fetchError) return <div className="flex flex-col items-center justify-center h-full p-8 text-center gap-6"><WifiOff className="w-10 h-10 text-red-500" /><p className="text-white">{fetchError}</p><button onClick={fetchInitialData} className="bg-white text-black px-8 py-4 rounded-2xl"><RefreshCw className="w-4 h-4 inline" /> Reconnect</button></div>;
 
-    if (fetchError) {
-      return (
-        <div className="flex flex-col items-center justify-center h-full p-8 text-center gap-6">
-          <div className="w-20 h-20 bg-red-500/10 rounded-[2.5rem] flex items-center justify-center border border-red-500/20 shadow-2xl">
-            <WifiOff className="w-10 h-10 text-red-500" />
-          </div>
-          <div>
-            <h3 className="text-white font-black uppercase tracking-[4px] text-sm mb-2">Signal Lost</h3>
-            <p className="text-gray-500 text-[10px] font-bold uppercase tracking-widest max-w-xs leading-relaxed">{fetchError}</p>
-          </div>
-          <button onClick={fetchInitialData} className="flex items-center gap-3 bg-white text-black px-8 py-4 rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-105 transition-transform active:scale-95">
-            <RefreshCw className="w-4 h-4" /> Reconnect Signal
-          </button>
-        </div>
-      );
-    }
-
-    // 🔍 GLOBAL SEARCH INTERCEPTOR
     if (globalSearchQuery.trim().length > 0) {
-      const searchResults = allChannels.filter(c => 
-          c.name.toLowerCase().includes(globalSearchQuery.toLowerCase())
-      ).slice(0, 100);
-
-      return (
-        <ChannelListView 
-          channels={searchResults}
-          category={{ id: 'search', name: `Search Results`, playlistUrl: '' }}
-          loading={false}
-          onBack={() => setGlobalSearchQuery('')} 
-          onSelectChannel={(ch) => { 
-            setGlobalSearchQuery(''); 
-            setLastMainView('categories'); 
-            playChannel(ch); 
-          }}
-        />
-      );
+      const searchResults = allChannels.filter(c => c.name.toLowerCase().includes(globalSearchQuery.toLowerCase())).slice(0, 100);
+      return <ChannelListView channels={searchResults} category={{ id: 'search', name: `Search Results`, playlistUrl: '' }} loading={false} onBack={() => setGlobalSearchQuery('')} onSelectChannel={(ch) => { setGlobalSearchQuery(''); setLastMainView('categories'); playChannel(ch); }} />;
     }
 
-    // STANDARD VIEWS
     switch (activeView) {
+      case 'about':
+        return <AboutView />;
+      case 'privacy':
+        return <PrivacyPolicyView />;
       case 'live-events':
         return <LiveEventsView matches={matches} onSelectMatch={handleMatchSelect} />;
       case 'categories':
-        return <CategoriesView onSelectCategory={handleCategorySelect} favoritesCount={favorites.length} />;
-      case 'channel-detail':
         return (
-          <ChannelListView 
-            channels={categoryChannels}
-            category={selectedCategory} 
-            loading={isCategoryLoading}
-            onBack={() => setActiveView('categories')} 
-            onSelectChannel={(ch) => { setLastMainView('channel-detail'); playChannel(ch); }}
+          <CategoriesView 
+            onSelectCategory={handleCategorySelect} 
+            favoritesCount={favorites.length} 
+            cloudCategories={cloudCategories}     
+            customCategories={customCategories}   
+            onAddCustom={handleAddCustomPlaylist} 
+            onDeleteCustom={handleDeleteCustomPlaylist} 
           />
         );
+      case 'channel-detail':
+        return <ChannelListView channels={categoryChannels} category={selectedCategory} loading={isCategoryLoading} onBack={() => setActiveView('categories')} onSelectChannel={(ch) => { setLastMainView('channel-detail'); playChannel(ch); }} />;
       case 'player':
         const related = categoryChannels.length > 0 ? categoryChannels.slice(0, 40) : allChannels.slice(0, 40);
-        return (
-          <PlayerView 
-            match={selectedMatch} 
-            onBack={() => setActiveView(lastMainView)} 
-            onEnterPiP={() => { setFloatingMatch(selectedMatch); setActiveView(lastMainView); }}
-            onShowMoreLinks={() => setShowLinkModal(true)}
-            relatedChannels={related}
-            onSelectRelated={(ch) => playChannel(ch)}
-            isFavorite={favorites.some(f => f.id === selectedMatch?.id)}
-            onToggleFavorite={() => {
-              if (selectedMatch) {
-                toggleFavorite({
-                  id: selectedMatch.id,
-                  name: selectedMatch.team1,
-                  logo: selectedMatch.team1Logo,
-                  categoryId: 'fav',
-                  streamUrl: selectedMatch.streamUrl
-                });
-              }
-            }}
-          />
-        );
+        return <PlayerView match={selectedMatch} onBack={() => setActiveView(lastMainView)} onEnterPiP={() => { setFloatingMatch(selectedMatch); setActiveView(lastMainView); }} onShowMoreLinks={() => setShowLinkModal(true)} relatedChannels={related} onSelectRelated={playChannel} isFavorite={favorites.some(f => f.id === selectedMatch?.id)} onToggleFavorite={() => { if (selectedMatch) toggleFavorite({ id: selectedMatch.id, name: selectedMatch.team1, logo: selectedMatch.team1Logo, categoryId: 'fav', streamUrl: selectedMatch.streamUrl }); }} />;
       default:
         return <LiveEventsView matches={matches} onSelectMatch={handleMatchSelect} />;
     }
@@ -301,28 +258,45 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-row h-screen overflow-hidden bg-[#0f1115] text-white">
-      {!isFullPlayer && <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} />}
+      
+      {!isFullPlayer && (
+        <Sidebar 
+          isOpen={isSidebarOpen} 
+          onClose={() => setSidebarOpen(false)} 
+          activeView={activeView}
+          onNavigate={(v) => { 
+              setActiveView(v); 
+              setLastMainView(v); 
+              setSidebarOpen(false); 
+          }} 
+        />
+      )}
       
       <div className="flex flex-col flex-1 relative min-w-0">
         {!isFullPlayer && (
           <Header 
-            title={activeView === 'categories' ? 'Playlists' : (activeView === 'channel-detail' ? (selectedCategory?.name || 'Channels') : 'CricPK Pro')} 
-            onOpenSidebar={() => setSidebarOpen(true)}
-            showBack={activeView === 'channel-detail'}
-            onBack={() => setActiveView('categories')}
-            searchQuery={globalSearchQuery}
-            onSearchChange={setGlobalSearchQuery}
+            title={
+              activeView === 'categories' ? 'Playlists' : 
+              activeView === 'channel-detail' ? (selectedCategory?.name || 'Channels') : 
+              activeView === 'about' ? 'About Us' : 
+              activeView === 'privacy' ? 'Privacy Policy' : 
+              'DAR TEVE'
+            } 
+            onOpenSidebar={() => setSidebarOpen(true)} 
+            showBack={activeView === 'channel-detail'} 
+            onBack={() => setActiveView('categories')} 
+            searchQuery={globalSearchQuery} 
+            onSearchChange={setGlobalSearchQuery} 
           />
         )}
-
         <main className={`flex-1 overflow-y-auto scrollbar-hide ${!isFullPlayer ? 'pb-24 md:pb-6' : ''}`}>
-          <div className={`${!isFullPlayer ? 'max-w-[1600px] mx-auto' : 'w-full h-full'}`}>
-            {renderView()}
-          </div>
+          <div className={`${!isFullPlayer ? 'max-w-[1600px] mx-auto' : 'w-full h-full'}`}>{renderView()}</div>
         </main>
-
         {!isFullPlayer && (
-          <BottomNav activeView={activeView === 'channel-detail' ? 'categories' : activeView} onViewChange={(v) => { setActiveView(v); setLastMainView(v); }} />
+          <BottomNav 
+            activeView={activeView === 'channel-detail' ? 'categories' : activeView} 
+            onViewChange={(v) => { setActiveView(v); setLastMainView(v); }} 
+          />
         )}
       </div>
 
