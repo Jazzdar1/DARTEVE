@@ -75,36 +75,39 @@ const App: React.FC = () => {
     localStorage.setItem('cricpk_custom_playlists', JSON.stringify(updated));
   };
 
-  const safeFetch = async (url: string) => {
-    // @ts-ignore
-    const p = window.puter;
-    if (p) {
-      try {
-        if (p.http && typeof p.http.fetch === 'function') return await p.http.fetch(url);
-        if (typeof p.fetch === 'function') return await p.fetch(url);
-      } catch (e) { }
+  // 👇 THE ULTIMATE CORS BYPASS FETCHER FOR PLAYLISTS 👇
+  const fetchM3UText = async (url: string) => {
+    // Attempt 1: Native Fetch
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Direct fetch blocked');
+      return await res.text();
+    } catch (e) {
+      // Attempt 2: CORS Proxy Fallback (Crucial for user-added M3U links)
+      console.warn("Direct fetch blocked by CORS. Tunneling via proxy...");
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+      const proxyRes = await fetch(proxyUrl);
+      if (!proxyRes.ok) throw new Error('Proxy fetch failed');
+      return await proxyRes.text();
     }
-    return await fetch(url);
   };
 
   const fetchInitialData = useCallback(async () => {
     setIsLoading(true);
     setFetchError(null);
     try {
-      const response = await safeFetch(DEFAULT_M3U);
-      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-      const text = await response.text();
+      const text = await fetchM3UText(DEFAULT_M3U);
+      if (!text) throw new Error("Empty playlist received");
+      
       const parsed = parseM3U(text, 'cat-combined');
       setMatches(parsed.matches);
       setAllChannels(parsed.channels);
       setPlaylistCache({ 'cat-combined': parsed.channels });
 
       try {
-        const cloudRes = await safeFetch(MASTER_JSON_URL);
-        if (cloudRes.ok) {
-          const cloudData = await cloudRes.json();
-          setCloudCategories(cloudData);
-        }
+        const cloudDataText = await fetchM3UText(MASTER_JSON_URL);
+        const cloudData = JSON.parse(cloudDataText);
+        setCloudCategories(cloudData);
       } catch (e) { console.log("Cloud master not found or empty yet."); }
 
     } catch (error: any) {
@@ -127,7 +130,10 @@ const App: React.FC = () => {
       if (line.startsWith('#EXTINF:')) {
         const logoMatch = line.match(/tvg-logo="([^"]+)"/);
         const groupMatch = line.match(/group-title="([^"]+)"/);
-        const name = line.split(',').pop() || 'Unknown Channel';
+        // Better channel name extraction
+        const nameSplit = line.split(',');
+        const name = nameSplit.length > 1 ? nameSplit.pop()?.trim() || 'Unknown Channel' : 'Unknown Channel';
+        
         currentInfo = {
           name,
           logo: logoMatch ? logoMatch[1] : `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
@@ -182,13 +188,27 @@ const App: React.FC = () => {
     } else {
       setIsCategoryLoading(true);
       try {
-        const response = await safeFetch(category.playlistUrl);
-        const text = await response.text();
+        // 👇 Uses the new CORS Proxy Fallback 👇
+        const text = await fetchM3UText(category.playlistUrl);
+        
+        if (!text || text.trim().length === 0) {
+            alert("This playlist link is empty or dead.");
+            setCategoryChannels([]);
+            return;
+        }
+
         const { channels } = parseM3U(text, category.id);
+        
+        if (channels.length === 0) {
+            alert("We connected to the link, but couldn't find any valid channels. Please check the M3U URL.");
+        }
+
         setCategoryChannels(channels);
         setPlaylistCache(prev => ({ ...prev, [category.id]: channels }));
       } catch (err) {
         console.error("Category Fetch Error:", err);
+        alert("Failed to load playlist. The link is completely blocked or invalid.");
+        setCategoryChannels([]);
       } finally {
         setIsCategoryLoading(false);
       }
@@ -227,30 +247,15 @@ const App: React.FC = () => {
     }
 
     switch (activeView) {
-      case 'about':
-        return <AboutView />;
-      case 'privacy':
-        return <PrivacyPolicyView />;
-      case 'live-events':
-        return <LiveEventsView matches={matches} onSelectMatch={handleMatchSelect} />;
-      case 'categories':
-        return (
-          <CategoriesView 
-            onSelectCategory={handleCategorySelect} 
-            favoritesCount={favorites.length} 
-            cloudCategories={cloudCategories}     
-            customCategories={customCategories}   
-            onAddCustom={handleAddCustomPlaylist} 
-            onDeleteCustom={handleDeleteCustomPlaylist} 
-          />
-        );
-      case 'channel-detail':
-        return <ChannelListView channels={categoryChannels} category={selectedCategory} loading={isCategoryLoading} onBack={() => setActiveView('categories')} onSelectChannel={(ch) => { setLastMainView('channel-detail'); playChannel(ch); }} />;
+      case 'about': return <AboutView />;
+      case 'privacy': return <PrivacyPolicyView />;
+      case 'live-events': return <LiveEventsView matches={matches} onSelectMatch={handleMatchSelect} />;
+      case 'categories': return <CategoriesView onSelectCategory={handleCategorySelect} favoritesCount={favorites.length} cloudCategories={cloudCategories} customCategories={customCategories} onAddCustom={handleAddCustomPlaylist} onDeleteCustom={handleDeleteCustomPlaylist} />;
+      case 'channel-detail': return <ChannelListView channels={categoryChannels} category={selectedCategory} loading={isCategoryLoading} onBack={() => setActiveView('categories')} onSelectChannel={(ch) => { setLastMainView('channel-detail'); playChannel(ch); }} />;
       case 'player':
         const related = categoryChannels.length > 0 ? categoryChannels.slice(0, 40) : allChannels.slice(0, 40);
         return <PlayerView match={selectedMatch} onBack={() => setActiveView(lastMainView)} onEnterPiP={() => { setFloatingMatch(selectedMatch); setActiveView(lastMainView); }} onShowMoreLinks={() => setShowLinkModal(true)} relatedChannels={related} onSelectRelated={playChannel} isFavorite={favorites.some(f => f.id === selectedMatch?.id)} onToggleFavorite={() => { if (selectedMatch) toggleFavorite({ id: selectedMatch.id, name: selectedMatch.team1, logo: selectedMatch.team1Logo, categoryId: 'fav', streamUrl: selectedMatch.streamUrl }); }} />;
-      default:
-        return <LiveEventsView matches={matches} onSelectMatch={handleMatchSelect} />;
+      default: return <LiveEventsView matches={matches} onSelectMatch={handleMatchSelect} />;
     }
   };
 
@@ -258,48 +263,19 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-row h-screen overflow-hidden bg-[#0f1115] text-white">
-      
-      {!isFullPlayer && (
-        <Sidebar 
-          isOpen={isSidebarOpen} 
-          onClose={() => setSidebarOpen(false)} 
-          activeView={activeView}
-          onNavigate={(v) => { 
-              setActiveView(v); 
-              setLastMainView(v); 
-              setSidebarOpen(false); 
-          }} 
-        />
-      )}
-      
+      {!isFullPlayer && <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} activeView={activeView} onNavigate={(v) => { setActiveView(v); setLastMainView(v); setSidebarOpen(false); }} />}
       <div className="flex flex-col flex-1 relative min-w-0">
         {!isFullPlayer && (
           <Header 
-            title={
-              activeView === 'categories' ? 'Playlists' : 
-              activeView === 'channel-detail' ? (selectedCategory?.name || 'Channels') : 
-              activeView === 'about' ? 'About Us' : 
-              activeView === 'privacy' ? 'Privacy Policy' : 
-              'DAR TEVE'
-            } 
-            onOpenSidebar={() => setSidebarOpen(true)} 
-            showBack={activeView === 'channel-detail'} 
-            onBack={() => setActiveView('categories')} 
-            searchQuery={globalSearchQuery} 
-            onSearchChange={setGlobalSearchQuery} 
+            title={activeView === 'categories' ? 'Playlists' : activeView === 'channel-detail' ? (selectedCategory?.name || 'Channels') : activeView === 'about' ? 'About Us' : activeView === 'privacy' ? 'Privacy Policy' : 'DAR TEVE'} 
+            onOpenSidebar={() => setSidebarOpen(true)} showBack={activeView === 'channel-detail'} onBack={() => setActiveView('categories')} searchQuery={globalSearchQuery} onSearchChange={setGlobalSearchQuery} 
           />
         )}
         <main className={`flex-1 overflow-y-auto scrollbar-hide ${!isFullPlayer ? 'pb-24 md:pb-6' : ''}`}>
           <div className={`${!isFullPlayer ? 'max-w-[1600px] mx-auto' : 'w-full h-full'}`}>{renderView()}</div>
         </main>
-        {!isFullPlayer && (
-          <BottomNav 
-            activeView={activeView === 'channel-detail' ? 'categories' : activeView} 
-            onViewChange={(v) => { setActiveView(v); setLastMainView(v); }} 
-          />
-        )}
+        {!isFullPlayer && <BottomNav activeView={activeView === 'channel-detail' ? 'categories' : activeView} onViewChange={(v) => { setActiveView(v); setLastMainView(v); }} />}
       </div>
-
       {floatingMatch && <FloatingPlayer match={floatingMatch} onExpand={() => { setSelectedMatch(floatingMatch); setFloatingMatch(null); setActiveView('player'); }} onClose={() => setFloatingMatch(null)} />}
       {showLinkModal && <LinkModal match={selectedMatch} onClose={() => setShowLinkModal(false)} onSelect={handleLinkSelect} />}
     </div>
