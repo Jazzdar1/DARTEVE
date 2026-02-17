@@ -1,0 +1,8 @@
+{
+  "name": "CricPK Clone",
+  "description": "A feature-rich sports streaming application with live match tracking, category-based channel browsing, and an integrated video player.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
