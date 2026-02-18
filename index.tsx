@@ -14,3 +14,12 @@ root.render(
     <App />
   </React.StrictMode>
 );
+// In your React Component
+const handlePlay = (matchData) => {
+    // Check if window.playMatch exists to avoid errors
+    if (window.playMatch) {
+        window.playMatch(matchData);
+    } else {
+        console.error("Router function not found");
+    }
+};

@@ -51,6 +51,23 @@
 </head>
 <body class="bg-[#0f1115]">
     <div id="root"></div>
+
+    <script>
+        window.playMatch = function(match) {
+            console.log("Attempting to play:", match);
+            const streamUrl = encodeURIComponent(match.url);
+            
+            if (match.type === "HLS" || !match.is_drm) {
+                // FanCode/Jio: Open DPlayer
+                window.location.href = `dplayer.html?url=${streamUrl}`;
+            } else {
+                // Hotstar/Prime: Open Video.js with License
+                const license = encodeURIComponent(match.license_url || '');
+                window.location.href = `videojs.html?url=${streamUrl}&license=${license}`;
+            }
+        }
+    </script>
+
 <script type="module" src="/index.tsx"></script>
 </body>
 </html>

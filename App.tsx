@@ -14,10 +14,23 @@ import PrivacyPolicyView from './views/PrivacyPolicyView';
 import { CATEGORIES } from './constants';
 import { WifiOff, RefreshCw } from 'lucide-react';
 
-const DEFAULT_M3U = 'https://raw.githubusercontent.com/FunctionError/PiratesTv/refs/heads/main/combined_playlist.m3u';
-const MASTER_JSON_URL = 'https://raw.githubusercontent.com/FunctionError/PiratesTv/refs/heads/main/master_playlists.json';
+// 🛠️ FIXED GITHUB URLs (No 404 Errors)
+const BASE_GITHUB = 'https://raw.githubusercontent.com/FunctionError/PiratesTv/main';
+const DEFAULT_M3U = `${BASE_GITHUB}/combined_playlist.m3u`;
+const MASTER_JSON_URL = `${BASE_GITHUB}/master_playlists.json`;
+
+// 🚀 DAR TEVE API LINKS (FanCode + Cricket + Jio + VIP)
+const API_BASE = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/main';
+const GROUP_A_URL = `${API_BASE}/live_matches_A.json`;
+const CRICKET_URL = `${API_BASE}/cricket_channels.json`;
+const JIO_URL = `${API_BASE}/jio_channels.json`;
+const VIP_URL = `${API_BASE}/vip_cricket.json`; // ⚡ Naya Jugaad Link
+const GROUP_B_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-B/main/live_matches_B.json';
 
 const App: React.FC = () => {
+  // ------------------------------------------------------------
+  // 1. STATE MANAGEMENT (Sab kuch wapis)
+  // ------------------------------------------------------------
   const [activeView, setActiveView] = useState<View>('live-events');
   const [lastMainView, setLastMainView] = useState<View>('live-events');
   const [isSidebarOpen, setSidebarOpen] = useState(false);
@@ -42,6 +55,9 @@ const App: React.FC = () => {
   const [isCategoryLoading, setIsCategoryLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  // ------------------------------------------------------------
+  // 2. EFFECTS (Load Favorites & Custom Lists)
+  // ------------------------------------------------------------
   useEffect(() => {
     const savedFavs = localStorage.getItem('cricpk_favorites');
     if (savedFavs) {
@@ -75,49 +91,22 @@ const App: React.FC = () => {
     localStorage.setItem('cricpk_custom_playlists', JSON.stringify(updated));
   };
 
-  // 👇 THE ULTIMATE CORS BYPASS FETCHER FOR PLAYLISTS 👇
+  // ------------------------------------------------------------
+  // 3. FETCHING LOGIC (Proxy & Parsers)
+  // ------------------------------------------------------------
   const fetchM3UText = async (url: string) => {
-    // Attempt 1: Native Fetch
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error('Direct fetch blocked');
       return await res.text();
     } catch (e) {
-      // Attempt 2: CORS Proxy Fallback (Crucial for user-added M3U links)
-      console.warn("Direct fetch blocked by CORS. Tunneling via proxy...");
+      // CORS Proxy Fallback
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
       const proxyRes = await fetch(proxyUrl);
       if (!proxyRes.ok) throw new Error('Proxy fetch failed');
       return await proxyRes.text();
     }
   };
-
-  const fetchInitialData = useCallback(async () => {
-    setIsLoading(true);
-    setFetchError(null);
-    try {
-      const text = await fetchM3UText(DEFAULT_M3U);
-      if (!text) throw new Error("Empty playlist received");
-      
-      const parsed = parseM3U(text, 'cat-combined');
-      setMatches(parsed.matches);
-      setAllChannels(parsed.channels);
-      setPlaylistCache({ 'cat-combined': parsed.channels });
-
-      try {
-        const cloudDataText = await fetchM3UText(MASTER_JSON_URL);
-        const cloudData = JSON.parse(cloudDataText);
-        setCloudCategories(cloudData);
-      } catch (e) { console.log("Cloud master not found or empty yet."); }
-
-    } catch (error: any) {
-      setFetchError(error.message || "Broadcaster synchronization failed.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchInitialData(); }, [fetchInitialData]);
 
   const parseM3U = (text: string, categoryId: string) => {
     const lines = text.split('\n');
@@ -130,13 +119,18 @@ const App: React.FC = () => {
       if (line.startsWith('#EXTINF:')) {
         const logoMatch = line.match(/tvg-logo="([^"]+)"/);
         const groupMatch = line.match(/group-title="([^"]+)"/);
-        // Better channel name extraction
         const nameSplit = line.split(',');
-        const name = nameSplit.length > 1 ? nameSplit.pop()?.trim() || 'Unknown Channel' : 'Unknown Channel';
+        const name = nameSplit.length > 1 ? nameSplit.pop()?.trim() || 'Unknown' : 'Unknown';
         
+        let logo = logoMatch ? logoMatch[1] : '';
+        // 🛠️ DEAD LOGO FIX
+        if (logo.includes('jio.dinesh29.com.np') || !logo) {
+             logo = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`;
+        }
+
         currentInfo = {
           name,
-          logo: logoMatch ? logoMatch[1] : `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
+          logo,
           group: groupMatch ? groupMatch[1] : 'General'
         };
       } else if (line.startsWith('http') && currentInfo) {
@@ -149,13 +143,12 @@ const App: React.FC = () => {
         };
         channels.push(channel);
 
-        const groupLower = currentInfo.group.toLowerCase();
+        // Auto-detect matches from M3U
         const nameLower = currentInfo.name.toLowerCase();
-        
-        if (groupLower.includes('sport') || nameLower.includes('sport') || nameLower.includes('cricket') || categoryId === 'cat-wc2026') {
+        if (nameLower.includes('sport') || nameLower.includes('cricket')) {
           matches.push({
             id: `m-${categoryId}-${matches.length}`,
-            sport: nameLower.includes('cricket') ? 'Cricket' : (nameLower.includes('football') ? 'Football' : 'Other'),
+            sport: nameLower.includes('cricket') ? 'Cricket' : 'Sports',
             league: currentInfo.group,
             team1: currentInfo.name,
             team2: 'Live Broadcast',
@@ -174,6 +167,100 @@ const App: React.FC = () => {
     return { channels, matches };
   };
 
+  const fetchInitialData = useCallback(async () => {
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      let currentMatches: Match[] = [];
+      let currentChannels: Channel[] = [];
+      let newCache: Record<string, Channel[]> = {};
+      let newCloudCats: Category[] = [];
+
+      // 1. Load Default M3U
+      try {
+        const text = await fetchM3UText(DEFAULT_M3U);
+        const parsed = parseM3U(text, 'cat-combined');
+        currentMatches = parsed.matches;
+        currentChannels = parsed.channels;
+        newCache['cat-combined'] = parsed.channels;
+      } catch (e) { console.log("Default M3U failed"); }
+
+      // 2. Load Master JSON (Genres)
+      try {
+        const cloudDataText = await fetchM3UText(MASTER_JSON_URL);
+        newCloudCats = JSON.parse(cloudDataText);
+      } catch (e) { console.log("Cloud master not found."); }
+
+      // 3. 🚀 FETCH ALL APIS (VIP Included) 🚀
+      const apiConfigs = [
+        { id: 'cat-fancode', name: 'FanCode LIVE', url: GROUP_A_URL, type: 'json', key: 'matches' },
+        { id: 'cat-vip', name: '⚡ VIP Cricket (WebCric)', url: VIP_URL, type: 'json', key: 'channels' }, // Priority
+        { id: 'cat-cricket', name: 'Cricket TV', url: CRICKET_URL, type: 'json', key: 'channels' },
+        { id: 'cat-jio', name: 'Jio TV', url: JIO_URL, type: 'json', key: 'channels' },
+        { id: 'cat-group-b', name: 'Hotstar & VIP', url: GROUP_B_URL, type: 'json', key: 'matches' }
+      ];
+
+      for (const config of apiConfigs) {
+        try {
+            const apiText = await fetchM3UText(config.url);
+            const apiData = JSON.parse(apiText);
+            const items = apiData[config.key] || apiData.matches || apiData.channels || [];
+            
+            if (items.length > 0) {
+                const apiChannels: Channel[] = items.map((m: any, idx: number) => ({
+                    id: `ch-${config.id}-${m.id || idx}`,
+                    name: m.title || m.name,
+                    logo: m.logo || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(config.name)}`,
+                    categoryId: config.id,
+                    streamUrl: m.url,
+                    isDrm: m.is_drm,
+                    licenseUrl: m.license_url
+                }));
+
+                newCache[config.id] = apiChannels;
+                newCloudCats = [{ id: config.id, name: config.name, playlistUrl: 'internal-api' }, ...newCloudCats];
+
+                const liveMatches: Match[] = items.map((m: any, idx: number) => ({
+                    id: m.id || `live-${config.id}-${idx}`,
+                    sport: m.sport || 'Sports',
+                    league: config.name,
+                    team1: m.title || m.name,
+                    team2: m.team_2 || 'LIVE',
+                    team1Logo: m.logo || m.team_1_flag || m.banner,
+                    team2Logo: m.logo || m.team_2_flag || m.banner,
+                    status: 'Live',
+                    time: 'Live Now',
+                    isHot: true,
+                    streamUrl: m.url,
+                    groupTitle: config.name,
+                    type: m.is_drm ? "DRM" : "HLS",
+                    license_url: m.license_url,
+                    is_drm: m.is_drm
+                }));
+                currentMatches = [...liveMatches, ...currentMatches];
+            }
+        } catch (err) {
+            console.warn(`Failed to load ${config.name}`, err);
+        }
+      }
+
+      setMatches(currentMatches);
+      setAllChannels(currentChannels);
+      setCloudCategories(newCloudCats);
+      setPlaylistCache(newCache);
+
+    } catch (error: any) {
+      setFetchError("Data sync failed. Check internet.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchInitialData(); }, [fetchInitialData]);
+
+  // ------------------------------------------------------------
+  // 4. NAVIGATION & VIEW LOGIC
+  // ------------------------------------------------------------
   const handleCategorySelect = async (category: Category) => {
     setSelectedCategory(category);
     setActiveView('channel-detail');
@@ -188,26 +275,16 @@ const App: React.FC = () => {
     } else {
       setIsCategoryLoading(true);
       try {
-        // 👇 Uses the new CORS Proxy Fallback 👇
         const text = await fetchM3UText(category.playlistUrl);
-        
         if (!text || text.trim().length === 0) {
             alert("This playlist link is empty or dead.");
             setCategoryChannels([]);
             return;
         }
-
         const { channels } = parseM3U(text, category.id);
-        
-        if (channels.length === 0) {
-            alert("We connected to the link, but couldn't find any valid channels. Please check the M3U URL.");
-        }
-
         setCategoryChannels(channels);
         setPlaylistCache(prev => ({ ...prev, [category.id]: channels }));
       } catch (err) {
-        console.error("Category Fetch Error:", err);
-        alert("Failed to load playlist. The link is completely blocked or invalid.");
         setCategoryChannels([]);
       } finally {
         setIsCategoryLoading(false);
@@ -216,6 +293,17 @@ const App: React.FC = () => {
   };
 
   const handleMatchSelect = (match: Match) => {
+    // 🚀 GLOBAL DRM ROUTER
+    if ((window as any).playMatch && (match.type === 'DRM' || match.is_drm)) {
+        (window as any).playMatch({
+            url: match.streamUrl,
+            type: match.type || 'HLS',
+            license_url: match.license_url,
+            is_drm: match.is_drm
+        });
+        return;
+    }
+
     setLastMainView('live-events');
     setSelectedMatch(match);
     setActiveView('player');

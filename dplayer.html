@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DarTeve Player</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+        #dplayer { width: 100%; height: 100%; }
+        .back-btn {
+            position: absolute; top: 20px; left: 20px; z-index: 100;
+            background: rgba(0,0,0,0.5); color: white; border: 1px solid white;
+            padding: 10px 20px; cursor: pointer; border-radius: 5px; font-family: sans-serif;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dplayer/dist/DPlayer.min.js"></script>
+</head>
+<body>
+
+<button class="back-btn" onclick="history.back()">← Back</button>
+<div id="dplayer"></div>
+
+<script>
+    // URL se link extract karna
+    const urlParams = new URLSearchParams(window.location.search);
+    const videoUrl = urlParams.get('url');
+
+    if (videoUrl) {
+        const dp = new DPlayer({
+            container: document.getElementById('dplayer'),
+            autoplay: true,
+            theme: '#FADFA3',
+            loop: false,
+            lang: 'en',
+            screenshot: true,
+            hotkey: true,
+            preload: 'auto',
+            video: {
+                url: videoUrl,
+                type: 'customHls',
+                customType: {
+                    customHls: function (video, player) {
+                        const hls = new Hls({
+                            // Kashmir Network Optimization
+                            enableWorker: true,
+                            lowLatencyMode: true,
+                            backBufferLength: 90
+                        });
+                        hls.loadSource(video.src);
+                        hls.attachMedia(video);
+                    },
+                },
+            },
+        });
+    } else {
+        alert("No Stream URL Found!");
+        history.back();
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DarTeve Premium Player</title>
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+        .video-js { width: 100%; height: 100%; }
+        .back-btn {
+            position: absolute; top: 20px; left: 20px; z-index: 999;
+            background: rgba(0,0,0,0.6); color: #fff; padding: 8px 16px;
+            border: 1px solid #444; border-radius: 4px; cursor: pointer; font-family: sans-serif;
+        }
+    </style>
+</head>
+<body>
+
+<button class="back-btn" onclick="history.back()">← Back to App</button>
+<video id="my-video" class="video-js vjs-default-skin" controls preload="auto"></video>
+
+<script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/videojs-contrib-eme@5.1.0/dist/videojs-contrib-eme.min.js"></script>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const streamUrl = urlParams.get('url');
+    const licenseUrl = urlParams.get('license');
+
+    if (streamUrl) {
+        var player = videojs('my-video', {
+            fluid: true,
+            autoplay: true,
+            controls: true,
+            html5: {
+                vhs: {
+                    overrideNative: true
+                },
+                nativeAudioTracks: false,
+                nativeVideoTracks: false
+            }
+        });
+
+        // EME Plugin Initialize
+        player.eme();
+
+        // Source Config
+        let srcConfig = {
+            src: streamUrl,
+            type: (streamUrl.includes('.mpd')) ? 'application/dash+xml' : 'application/x-mpegURL'
+        };
+
+        // Agar DRM License hai toh add karo
+        if (licenseUrl && licenseUrl !== 'null' && licenseUrl !== '') {
+            srcConfig.keySystems = {
+                'com.widevine.alpha': licenseUrl
+            };
+        }
+
+        player.src(srcConfig);
+        
+        player.on('error', function() {
+            console.log("Player Error:", player.error());
+        });
+    }
+</script>
+</body>
+</html>
