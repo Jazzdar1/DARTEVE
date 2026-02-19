@@ -49,6 +49,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   const [qualities, setQualities] = useState<any[]>([]);
   const [currentQuality, setCurrentQuality] = useState<number>(-1);
 
+  // 🛠️ FIX: Safe splitting for team name to avoid crash
   const similarChannels = useMemo(() => {
     if (!match || !match.team1) return [];
     try {
@@ -75,31 +76,20 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     }
   };
 
-  // 🛠️ JUGAAD FUNCTION: HTTP to HTTPS Proxy
-  const getSecureStreamUrl = (originalUrl: string) => {
-    // Agar hum HTTPS (Vercel) par hain aur link HTTP hai
-    if (window.location.protocol === 'https:' && originalUrl.startsWith('http:')) {
-        console.log("🔒 Securing HTTP Stream via Proxy...");
-        // CorsProxy.io use kar rahe hain jo SSL provide karta hai
-        return `https://corsproxy.io/?${encodeURIComponent(originalUrl)}`;
-    }
-    return originalUrl;
-  };
-
   useEffect(() => {
+    // 🛠️ FIX: Check if match exists AND has a streamUrl
     if (!match || !match.streamUrl) return;
     
     setError(null);
     setWarning(null);
     destroyAllPlayers();
 
-    // Yahan hum apna Jugaad function call kar rahe hain
-    const streamUrl = getSecureStreamUrl(match.streamUrl);
+    const streamUrl = match.streamUrl;
 
     // 👇 FANCODE 404 BYPASS LOGIC 👇
     const applyUniqueBypass = (xhr: any, url: string) => {
       try {
-        if (url.includes('dai.google.com') || url.includes('fancode') || url.includes('corsproxy')) {
+        if (url.includes('dai.google.com') || url.includes('fancode')) {
            xhr.open('GET', url, true);
            return;
         }
@@ -139,7 +129,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
           if (data.fatal) {
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
             else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-            else setError("Stream blocked (Mixed Content). Try switching Engine.");
+            else setError("Stream blocked. Try switching Engine in settings.");
           }
         });
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -195,12 +185,13 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     }
 
     return () => destroyAllPlayers();
-  }, [match?.streamUrl, activeEngine]); 
+  }, [match?.streamUrl, activeEngine]); // 🛠️ FIX: Depend only on streamUrl string
 
   const handleVolumeChange = (val: number) => {
     setVolume(val);
     if (activeEngine !== 'native' || !videoRef.current) return; 
     
+    // Audio Context Init Logic (kept same as your code)
     if (!audioCtxRef.current) {
       try {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -222,15 +213,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     }
   };
 
-  // Open external player helper
-  const openExternalPlayer = (player: 'vlc' | 'exo') => {
-    if (!match?.streamUrl) return;
-    let streamUrl = match.streamUrl;
-    const title = encodeURIComponent(match.team1 || "Stream");
-    if (player === 'vlc') window.location.href = `vlc://${streamUrl}`;
-    else if (player === 'exo') window.location.href = `intent:${streamUrl}#Intent;action=android.intent.action.VIEW;type=video/*;title=${title};end`;
-  };
-
+  // 🛠️ FIX: Guard Clause - If no match, show loading instead of crashing
   if (!match) {
       return (
         <div className="flex items-center justify-center h-screen bg-black text-white">
@@ -282,9 +265,6 @@ const PlayerView: React.FC<PlayerViewProps> = ({
             <div className="absolute inset-0 flex flex-col items-center justify-center p-4 md:p-6 text-center bg-[#1a1d23] gap-4 z-20">
               <AlertCircle className="w-10 h-10 md:w-12 md:h-12 text-red-500" />
               <p className="text-red-400 text-xs md:text-sm font-semibold max-w-sm">{error}</p>
-              <div className="flex gap-2 mt-4">
-                 <button onClick={() => openExternalPlayer('vlc')} className="px-4 py-2 bg-orange-600 rounded text-xs font-bold">Open VLC</button>
-              </div>
             </div>
           ) : (
             <div className="w-full h-full relative" style={brightness !== 100 ? { filter: `brightness(${brightness}%)` } : {}}>
