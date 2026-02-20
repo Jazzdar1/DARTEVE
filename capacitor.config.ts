@@ -4,10 +4,15 @@ const config: CapacitorConfig = {
   appId: 'com.dartv.app',
   appName: 'DarTV',
   webDir: 'dist',
-  // 👇 This is the magic part that unblocks the video streams 👇
   server: {
     cleartext: true,
     allowNavigation: ['*']
+  },
+  // 👇 This new section will permanently kill the browser CORS security 👇
+  plugins: {
+    CapacitorHttp: {
+      enabled: true,
+    }
   }
 };
 
