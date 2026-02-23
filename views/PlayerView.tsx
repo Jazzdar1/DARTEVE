@@ -53,17 +53,14 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     setLoading(true);
     const video = videoRef.current;
     
-    let finalUrl = match.streamUrl;
+    // 👇 All proxies removed. Using the pure, original stream URL. 👇
+    const finalUrl = match.streamUrl;
 
     if (Hls.isSupported()) {
       if (hlsRef.current) hlsRef.current.destroy();
       
-      const hls = new Hls({
-        maxBufferLength: 30,
-        maxMaxBufferLength: 600,
-        lowLatencyMode: true,
-        enableWorker: true,
-      });
+      // 👇 Removed aggressive experimental settings. Using stable defaults. 👇
+      const hls = new Hls();
 
       hlsRef.current = hls;
       hls.loadSource(finalUrl);
@@ -81,7 +78,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
             hls.startLoad();
           } else {
             setLoading(false);
-            setError("Stream error. The server might be offline.");
+            setError("Stream error. The server might be offline or blocking access.");
           }
         }
       });
@@ -105,7 +102,6 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     if (!videoRef.current) return;
     const diffY = touchStartY.current - e.touches[0].clientY;
     
-    // Sensitivity check
     if (Math.abs(diffY) > 5) { 
       if (isVolumeArea.current) {
         let newVol = volume + (diffY > 0 ? 2 : -2);
@@ -146,7 +142,6 @@ const PlayerView: React.FC<PlayerViewProps> = ({
       
       <div 
         ref={containerRef} 
-        // 👇 Added touch-none and select-none to fix Android swipe issues 👇
         className={`relative w-full bg-black flex flex-col justify-center transition-all shrink-0 touch-none select-none ${isFullscreen ? 'h-screen fixed inset-0 z-50' : 'aspect-video'}`}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -155,7 +150,8 @@ const PlayerView: React.FC<PlayerViewProps> = ({
         {loading && <div className="absolute inset-0 flex items-center justify-center z-20"><div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin"></div></div>}
         {error && <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-30 p-4 text-center"><AlertCircle className="w-10 h-10 text-red-500 mb-2" /><p className="text-red-400 font-bold text-sm">{error}</p></div>}
 
-        <video ref={videoRef} className="w-full h-full object-contain pointer-events-none" playsInline crossOrigin="anonymous" style={{ filter: `brightness(${brightness}%)` }} />
+        {/* 👇 No crossOrigin here, pure video element 👇 */}
+        <video ref={videoRef} className="w-full h-full object-contain pointer-events-none" playsInline style={{ filter: `brightness(${brightness}%)` }} />
 
         <div className={`absolute inset-0 flex flex-col justify-between bg-gradient-to-b from-black/80 via-transparent to-black/80 transition-opacity duration-300 z-40 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
           <div className="flex items-center justify-between p-4" onClick={(e) => e.stopPropagation()}>

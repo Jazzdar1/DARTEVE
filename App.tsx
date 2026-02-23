@@ -19,13 +19,16 @@ const BASE_GITHUB = 'https://raw.githubusercontent.com/FunctionError/PiratesTv/m
 const DEFAULT_M3U = `${BASE_GITHUB}/combined_playlist.m3u`;
 const MASTER_JSON_URL = `${BASE_GITHUB}/master_playlists.json`;
 
-// 🚀 DAR TEVE API LINKS (FanCode + Cricket + Jio + VIP)
+// 🚀 DAR TEVE API LINKS (FanCode + Cricket + Jio + VIP + Vast Search)
 const API_BASE = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/main';
 const GROUP_A_URL = `${API_BASE}/live_matches_A.json`;
 const CRICKET_URL = `${API_BASE}/cricket_channels.json`;
 const JIO_URL = `${API_BASE}/jio_channels.json`;
 const VIP_URL = `${API_BASE}/vip_cricket.json`; // ⚡ Naya Jugaad Link
 const GROUP_B_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-B/main/live_matches_B.json';
+
+// 🔥 AAPKA NAYA VAST SEARCH LINK YAHAN HAI 🔥
+const VAST_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/refs/heads/main/dartv_vast_channels.json';
 
 const App: React.FC = () => {
   // ------------------------------------------------------------
@@ -191,28 +194,31 @@ const App: React.FC = () => {
         newCloudCats = JSON.parse(cloudDataText);
       } catch (e) { console.log("Cloud master not found."); }
 
-      // 3. 🚀 FETCH ALL APIS (VIP Included) 🚀
+      // 3. 🚀 FETCH ALL APIS (VIP & Vast Included) 🚀
       const apiConfigs = [
         { id: 'cat-fancode', name: 'FanCode LIVE', url: GROUP_A_URL, type: 'json', key: 'matches' },
-        { id: 'cat-vip', name: '⚡ VIP Cricket (WebCric)', url: VIP_URL, type: 'json', key: 'channels' }, // Priority
+        { id: 'cat-vip', name: '⚡ VIP Cricket (WebCric)', url: VIP_URL, type: 'json', key: 'channels' },
         { id: 'cat-cricket', name: 'Cricket TV', url: CRICKET_URL, type: 'json', key: 'channels' },
         { id: 'cat-jio', name: 'Jio TV', url: JIO_URL, type: 'json', key: 'channels' },
-        { id: 'cat-group-b', name: 'Hotstar & VIP', url: GROUP_B_URL, type: 'json', key: 'matches' }
+        { id: 'cat-group-b', name: 'Hotstar & VIP', url: GROUP_B_URL, type: 'json', key: 'matches' },
+        { id: 'cat-vast', name: '📺 Vast Channels (All TV)', url: VAST_URL, type: 'json', key: 'channels' } // Naya Vast Search Link
       ];
 
       for (const config of apiConfigs) {
         try {
             const apiText = await fetchM3UText(config.url);
             const apiData = JSON.parse(apiText);
-            const items = apiData[config.key] || apiData.matches || apiData.channels || [];
+            
+            // Yahan code behtar kiya hai taake seedhi JSON file (array) asani se load ho sake
+            const items = Array.isArray(apiData) ? apiData : (apiData[config.key] || apiData.matches || apiData.channels || []);
             
             if (items.length > 0) {
                 const apiChannels: Channel[] = items.map((m: any, idx: number) => ({
                     id: `ch-${config.id}-${m.id || idx}`,
                     name: m.title || m.name,
-                    logo: m.logo || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(config.name)}`,
+                    logo: m.logo || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name)}`, // Har channel ka apna name-based logo aayega
                     categoryId: config.id,
-                    streamUrl: m.url,
+                    streamUrl: m.url || m.streamUrl,
                     isDrm: m.is_drm,
                     licenseUrl: m.license_url
                 }));
@@ -222,17 +228,17 @@ const App: React.FC = () => {
 
                 const liveMatches: Match[] = items.map((m: any, idx: number) => ({
                     id: m.id || `live-${config.id}-${idx}`,
-                    sport: m.sport || 'Sports',
+                    sport: m.sport || m.category || 'Sports',
                     league: config.name,
                     team1: m.title || m.name,
                     team2: m.team_2 || 'LIVE',
-                    team1Logo: m.logo || m.team_1_flag || m.banner,
-                    team2Logo: m.logo || m.team_2_flag || m.banner,
+                    team1Logo: m.logo || m.team_1_flag || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name)}`,
+                    team2Logo: m.logo || m.team_2_flag || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name)}`,
                     status: 'Live',
                     time: 'Live Now',
                     isHot: true,
-                    streamUrl: m.url,
-                    groupTitle: config.name,
+                    streamUrl: m.url || m.streamUrl,
+                    groupTitle: m.category || config.name,
                     type: m.is_drm ? "DRM" : "HLS",
                     license_url: m.license_url,
                     is_drm: m.is_drm

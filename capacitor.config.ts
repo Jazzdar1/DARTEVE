@@ -8,7 +8,7 @@ const config: CapacitorConfig = {
     cleartext: true,
     allowNavigation: ['*']
   },
-  // 👇 This new section will permanently kill the browser CORS security 👇
+  // 👇 This will unlock the rest of the channels on the mobile app 👇
   plugins: {
     CapacitorHttp: {
       enabled: true,
