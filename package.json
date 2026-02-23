@@ -13,6 +13,7 @@
     "@capacitor/core": "^8.1.0",
     "@google/genai": "^1.41.0",
     "@heyputer/puter.js": "^2.2.10",
+    "dashjs": "^5.1.1",
     "dplayer": "^1.27.1",
     "hls.js": "^1.6.15",
     "lucide-react": "^0.564.0",

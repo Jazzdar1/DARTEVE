@@ -19,6 +19,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const dashRef = useRef<any>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,44 +54,137 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     setLoading(true);
     const video = videoRef.current;
     
-    // 👇 All proxies removed. Using the pure, original stream URL. 👇
-    const finalUrl = match.streamUrl;
+    // URL aur Headers Saaf Karna
+    const rawUrl = match.streamUrl;
+    const cleanUrl = rawUrl.split('|')[0].trim();
+    
+    let customHeaders: Record<string, string> = {};
+    if (rawUrl.includes('|')) {
+       const headerString = rawUrl.split('|')[1];
+       const urlParams = new URLSearchParams(headerString);
+       urlParams.forEach((value, key) => { customHeaders[key] = value; });
+    }
 
-    if (Hls.isSupported()) {
-      if (hlsRef.current) hlsRef.current.destroy();
-      
-      // 👇 Removed aggressive experimental settings. Using stable defaults. 👇
-      const hls = new Hls();
+    const isDash = cleanUrl.includes('.mpd');
 
-      hlsRef.current = hls;
-      hls.loadSource(finalUrl);
-      hls.attachMedia(video);
+    // Purane instances ko band karein
+    if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+    }
+    if (dashRef.current) {
+        try { dashRef.current.reset(); dashRef.current.destroy(); } catch(e){}
+        dashRef.current = null;
+    }
 
-      hls.on(Hls.Events.MANIFEST_PARSED, (e, data) => {
-        setQualities(data.levels);
-        setLoading(false);
-        video.play().catch(e => console.log("Autoplay issue", e));
-      });
+    if (isDash) {
+      console.log("🚀 Loading DASH Engine Safely...");
 
-      hls.on(Hls.Events.ERROR, (event, data) => {
-        if (data.fatal) {
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            hls.startLoad();
-          } else {
-            setLoading(false);
-            setError("Stream error. The server might be offline or blocking access.");
+      // 🛡️ SULTAN'S BULLETPROOF DASH LOADER
+      const initDash = (dashjsObj: any) => {
+          try {
+              if (!dashjsObj || !dashjsObj.MediaPlayer) throw new Error("MediaPlayer missing");
+
+              const dashPlayer = dashjsObj.MediaPlayer().create();
+              dashRef.current = dashPlayer;
+
+              if (match.license_url) {
+                if (match.license_url.includes(':')) {
+                   const [kid, key] = match.license_url.split(':');
+                   dashPlayer.setProtectionData({
+                       "org.w3.clearkey": { clearkeys: { [kid]: key } }
+                   });
+                } else {
+                   dashPlayer.setProtectionData({
+                       "com.widevine.alpha": { serverURL: match.license_url },
+                       "org.w3.clearkey": { serverURL: match.license_url }
+                   });
+                }
+              }
+
+              dashPlayer.initialize(video, cleanUrl, true);
+
+              dashPlayer.on(dashjsObj.MediaPlayer.events.PLAYBACK_PLAYING, () => setLoading(false));
+              dashPlayer.on(dashjsObj.MediaPlayer.events.ERROR, (e: any) => {
+                  console.error("DASH Error:", e);
+                  setLoading(false);
+                  if (e.error === "download") {
+                      setError("CORS ya Server Block. Localhost par extension on karein.");
+                  } else {
+                      setError("Stream error ya DRM restriction hai.");
+                  }
+              });
+          } catch(err) {
+              console.error("Crash prevented:", err);
+              setError("Player engine mein error hai. Koi doosra channel try karein.");
+              setLoading(false);
           }
-        }
-      });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = finalUrl;
-      video.play();
+      };
+
+      // Agar script pehle se load nahi hai to direct official CDN se mangwayein
+      if ((window as any).dashjs) {
+          initDash((window as any).dashjs);
+      } else {
+          const script = document.createElement('script');
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/dashjs/4.7.4/dash.all.min.js";
+          script.async = true;
+          script.onload = () => initDash((window as any).dashjs);
+          script.onerror = () => {
+              setError("Video engine load nahi ho saka. Internet check karein.");
+              setLoading(false);
+          };
+          document.body.appendChild(script);
+      }
+
+    } else {
+      console.log("🚀 Starting HLS Engine");
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          debug: false,
+          xhrSetup: (xhr) => {
+             if (Object.keys(customHeaders).length > 0) {
+                 for (const key in customHeaders) {
+                     xhr.setRequestHeader(key, customHeaders[key]);
+                 }
+             }
+          }
+        });
+
+        hlsRef.current = hls;
+        hls.loadSource(cleanUrl);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, (e, data) => {
+          setQualities(data.levels);
+          setLoading(false);
+          video.play().catch(e => console.log("Autoplay issue"));
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            setLoading(false);
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+               console.error("HLS Network Error: CORS Blocked");
+               setError("CORS Policy Error. Server is blocking.");
+               hls.startLoad();
+            } else {
+               setError("Stream error. Link offline ho gaya hai.");
+            }
+          }
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = cleanUrl;
+        video.play();
+      }
     }
 
     return () => {
       if (hlsRef.current) { hlsRef.current.destroy(); }
+      if (dashRef.current) {
+          try { dashRef.current.reset(); dashRef.current.destroy(); } catch(e){}
+      }
     };
-  }, [match?.streamUrl]);
+  }, [match?.streamUrl, match?.license_url]);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
@@ -150,7 +244,6 @@ const PlayerView: React.FC<PlayerViewProps> = ({
         {loading && <div className="absolute inset-0 flex items-center justify-center z-20"><div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin"></div></div>}
         {error && <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-30 p-4 text-center"><AlertCircle className="w-10 h-10 text-red-500 mb-2" /><p className="text-red-400 font-bold text-sm">{error}</p></div>}
 
-        {/* 👇 No crossOrigin here, pure video element 👇 */}
         <video ref={videoRef} className="w-full h-full object-contain pointer-events-none" playsInline style={{ filter: `brightness(${brightness}%)` }} />
 
         <div className={`absolute inset-0 flex flex-col justify-between bg-gradient-to-b from-black/80 via-transparent to-black/80 transition-opacity duration-300 z-40 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
