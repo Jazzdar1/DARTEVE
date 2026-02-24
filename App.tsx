@@ -13,7 +13,7 @@ import AboutView from './views/AboutView';
 import PrivacyPolicyView from './views/PrivacyPolicyView';
 import { WifiOff, RefreshCw } from 'lucide-react';
 
-// 🚀 SAARI PLAYLISTS KE LINKS (FanCode Removed)
+// 🚀 PLAYLIST LINKS
 const BASE_GITHUB = 'https://raw.githubusercontent.com/FunctionError/PiratesTv/main';
 const DEFAULT_M3U = `${BASE_GITHUB}/combined_playlist.m3u`;
 
@@ -24,6 +24,28 @@ const VIP_URL = `${API_BASE}/vip_cricket.json`;
 const SULTAN_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/refs/heads/main/sultan_cricket.json';
 const VAST_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/refs/heads/main/dartv_vast_channels.json';
 const GROUP_B_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-B/main/live_matches_B.json';
+
+// 🏆 SULTAN VIP / PREMIUM LIVE MATCHES
+const PREMIUM_LIVE_MATCHES: Match[] = [
+  {
+    id: 'cat-sultan-wc-1', sport: 'Cricket', league: 'ICC World Cup', team1: 'Star Sports 1 (HD)', team2: 'LIVE MATCH',
+    team1Logo: 'https://upload.wikimedia.org/wikipedia/commons/f/f6/Star_Sports_1_Hindi_2023.svg',
+    team2Logo: 'https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_160,q_50/lsci/db/PICTURES/CMS/313100/313129.logo.png',
+    status: 'Live', time: 'Live Now', isHot: true, streamUrl: 'https://vaathala00.github.io/hotstar/sports/t20/', groupTitle: 'World Cup LIVE', type: 'Iframe'
+  },
+  {
+    id: 'cat-sultan-wc-2', sport: 'Cricket', league: 'T20 LIVE', team1: 'Ten Sports (HD)', team2: 'LIVE MATCH',
+    team1Logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/d/d3/Ten_Sports_Logo.svg/1200px-Ten_Sports_Logo.svg.png',
+    team2Logo: 'https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_160,q_50/lsci/db/PICTURES/CMS/313100/313128.logo.png',
+    status: 'Live', time: 'Live Now', isHot: true, streamUrl: 'https://vaathala00.github.io/hotstar/sports/t20/', groupTitle: 'World Cup LIVE', type: 'Iframe'
+  },
+  {
+    id: 'cat-sultan-wc-3', sport: 'Cricket', league: 'ICC Tournaments', team1: 'PTV Sports LIVE', team2: 'LIVE MATCH',
+    team1Logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/PTV_Sports_logo.svg/1200px-PTV_Sports_logo.svg.png',
+    team2Logo: 'https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_160,q_50/lsci/db/PICTURES/CMS/340400/340493.png',
+    status: 'Live', time: 'Live Now', isHot: true, streamUrl: 'https://vaathala00.github.io/hotstar/sports/t20/', groupTitle: 'World Cup LIVE', type: 'Iframe'
+  }
+];
 
 const App: React.FC = () => {
   const [activeView, setActiveView] = useState<View>('live-events');
@@ -105,18 +127,10 @@ const App: React.FC = () => {
         const groupMatch = line.match(/group-title="([^"]+)"/);
         const nameSplit = line.split(',');
         const name = nameSplit.length > 1 ? nameSplit.pop()?.trim() || 'Unknown' : 'Unknown';
-        
         let logo = logoMatch ? logoMatch[1] : `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`;
-
         currentInfo = { name, logo, group: groupMatch ? groupMatch[1] : 'General' };
       } else if (line.startsWith('http') && currentInfo) {
-        channels.push({
-          id: `ch-${categoryId}-${channels.length}`,
-          name: currentInfo.name,
-          logo: currentInfo.logo,
-          categoryId: categoryId,
-          streamUrl: line
-        });
+        channels.push({ id: `ch-${categoryId}-${channels.length}`, name: currentInfo.name, logo: currentInfo.logo, categoryId: categoryId, streamUrl: line });
         currentInfo = null;
       }
     }
@@ -124,14 +138,19 @@ const App: React.FC = () => {
   };
 
   const fetchInitialData = useCallback(async () => {
-    setIsLoading(true);
+    
+    // 🚀 MAGIC TRICK 1: Fauran Premium Matches Dikhao aur Loader Band Kardo! (0.1 Second Load)
+    setMatches([...PREMIUM_LIVE_MATCHES]);
+    setIsLoading(false);
     setFetchError(null);
+
     try {
-      let currentMatches: Match[] = [];
+      let currentMatches: Match[] = [...PREMIUM_LIVE_MATCHES];
       let currentChannels: Channel[] = [];
       let newCache: Record<string, Channel[]> = {};
       let newCloudCats: Category[] = [];
 
+      // 1. Purani M3U Playlist Load (Background)
       try {
         const text = await fetchM3UText(DEFAULT_M3U);
         const parsed = parseM3U(text, 'cat-combined');
@@ -142,7 +161,7 @@ const App: React.FC = () => {
         console.log("M3U load failed");
       }
 
-      // FanCode nikal kar baqi saari playlists
+      // 🚀 MAGIC TRICK 2: Parallel Fetching (Bari Bari nahi, sab ek sath!)
       const apiConfigs = [
         { id: 'cat-group-b', name: 'Hotstar LIVE', url: GROUP_B_URL, type: 'json', key: 'matches' },
         { id: 'cat-vip', name: '⚡ VIP Cricket', url: VIP_URL, type: 'json', key: 'channels' },
@@ -152,65 +171,74 @@ const App: React.FC = () => {
         { id: 'cat-vast', name: '📺 Vast Channels', url: VAST_URL, type: 'json', key: 'channels' }
       ];
 
-      for (const config of apiConfigs) {
+      // Sab API calls ek sath execute hongi
+      const apiResults = await Promise.all(
+        apiConfigs.map(async (config) => {
           try {
-              const text = await fetchM3UText(config.url);
-              const apiData = JSON.parse(text);
-              const items = Array.isArray(apiData) ? apiData : (apiData[config.key] || apiData.matches || apiData.channels || []);
-              
-              if (items.length > 0) {
-                  const apiChannels: Channel[] = items.map((m: any, idx: number) => ({
-                      id: `ch-${config.id}-${m.id || idx}`,
-                      name: m.title || m.name || `Channel ${idx}`,
-                      logo: m.logo || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name)}`,
-                      categoryId: config.id,
-                      streamUrl: m.url || m.streamUrl || ''
-                  })).filter(c => c.streamUrl);
-
-                  newCache[config.id] = apiChannels;
-                  currentChannels = [...currentChannels, ...apiChannels];
-                  newCloudCats.push({ id: config.id, name: config.name, playlistUrl: 'internal-api' });
-
-                  const sportsKeywords = ['cricket', 'hockey', 'kabaddi', 'sport', 'wwe', 'tennis', 'football'];
-                  const liveMatches: Match[] = items.filter((m: any) => {
-                      if (config.key === 'matches') return true; 
-                      const title = (m.title || m.name || '').toLowerCase();
-                      const category = (m.category || '').toLowerCase();
-                      return sportsKeywords.some(kw => title.includes(kw) || category.includes(kw));
-                  }).map((m: any, idx: number) => ({
-                      id: m.id || `live-${config.id}-${idx}`,
-                      sport: m.sport || m.category || 'Sports',
-                      league: config.name,
-                      team1: m.title || m.name,
-                      team2: m.team_2 || 'LIVE',
-                      team1Logo: m.logo || m.team_1_flag || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name)}`,
-                      team2Logo: m.logo || m.team_2_flag || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name)}`,
-                      status: 'Live',
-                      time: 'Live Now',
-                      isHot: true,
-                      streamUrl: m.url || m.streamUrl,
-                      groupTitle: m.category || config.name,
-                      type: "Mixed"
-                  }));
-                  
-                  currentMatches = [...currentMatches, ...liveMatches];
-              }
-          } catch(e) {
-              console.log("Failed to load", config.name);
+            const text = await fetchM3UText(config.url);
+            return { config, data: JSON.parse(text) };
+          } catch (err) {
+            return { config, data: null };
           }
-      }
+        })
+      );
 
+      // Data ko merge karna
+      apiResults.forEach(({ config, data: apiData }) => {
+        if (!apiData) return;
+        const items = Array.isArray(apiData) ? apiData : (apiData[config.key] || apiData.matches || apiData.channels || []);
+        
+        if (items.length > 0) {
+            const apiChannels: Channel[] = items.map((m: any, idx: number) => ({
+                id: `ch-${config.id}-${m.id || idx}`,
+                name: m.title || m.name || `Channel ${idx}`,
+                logo: m.logo || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name)}`,
+                categoryId: config.id,
+                streamUrl: m.url || m.streamUrl || ''
+            })).filter(c => c.streamUrl);
+
+            newCache[config.id] = apiChannels;
+            currentChannels = [...currentChannels, ...apiChannels];
+            newCloudCats.push({ id: config.id, name: config.name, playlistUrl: 'internal-api' });
+
+            const sportsKeywords = ['cricket', 'hockey', 'kabaddi', 'sport', 'wwe', 'tennis', 'football'];
+            const dynamicLiveMatches: Match[] = items.filter((m: any) => {
+                if (config.key === 'matches') return true; 
+                const title = (m.title || m.name || '').toLowerCase();
+                const category = (m.category || '').toLowerCase();
+                return sportsKeywords.some(kw => title.includes(kw) || category.includes(kw));
+            }).map((m: any, idx: number) => ({
+                id: m.id || `live-${config.id}-${idx}`,
+                sport: m.sport || m.category || 'Sports',
+                league: config.name,
+                team1: m.title || m.name,
+                team2: m.team_2 || 'LIVE',
+                team1Logo: m.logo || m.team_1_flag || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name)}`,
+                team2Logo: m.logo || m.team_2_flag || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name)}`,
+                status: 'Live',
+                time: 'Live Now',
+                isHot: true,
+                streamUrl: m.url || m.streamUrl,
+                groupTitle: m.category || config.name,
+                type: "Mixed"
+            }));
+            
+            currentMatches = [...currentMatches, ...dynamicLiveMatches];
+        }
+      });
+
+      // 🚀 Akhir mein UI ko background se update kardo
       setMatches(currentMatches);
       setAllChannels(currentChannels);
       setCloudCategories(newCloudCats);
       setPlaylistCache(newCache);
 
     } catch (error: any) {
-      setFetchError("Data sync failed. Check internet.");
-    } finally {
-      setIsLoading(false);
+      console.error("Background data fetch failed", error);
+      // Failsafe error show karne ke liye agar bilkul hi internet na ho
+      if (matches.length === 0) setFetchError("Please check your internet connection.");
     }
-  }, []);
+  }, []); // Emapty array taake loop na chalay
 
   useEffect(() => { fetchInitialData(); }, [fetchInitialData]);
 
