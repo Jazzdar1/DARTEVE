@@ -13,12 +13,11 @@ import AboutView from './views/AboutView';
 import PrivacyPolicyView from './views/PrivacyPolicyView';
 import { WifiOff, RefreshCw } from 'lucide-react';
 
-// 🚀 SAARI PLAYLISTS KE LINKS (1200+ Channels)
+// 🚀 SAARI PLAYLISTS KE LINKS (FanCode Removed)
 const BASE_GITHUB = 'https://raw.githubusercontent.com/FunctionError/PiratesTv/main';
 const DEFAULT_M3U = `${BASE_GITHUB}/combined_playlist.m3u`;
 
 const API_BASE = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/main';
-const GROUP_A_URL = `${API_BASE}/live_matches_A.json`;
 const CRICKET_URL = `${API_BASE}/cricket_channels.json`;
 const JIO_URL = `${API_BASE}/jio_channels.json`;
 const VIP_URL = `${API_BASE}/vip_cricket.json`; 
@@ -80,7 +79,6 @@ const App: React.FC = () => {
     localStorage.setItem('cricpk_custom_playlists', JSON.stringify(updated));
   };
 
-  // 🚀 FAST FETCH: Cache buster hata diya taake app fauran load ho
   const fetchM3UText = async (originalUrl: string) => {
     try {
       const res = await fetch(originalUrl);
@@ -134,7 +132,6 @@ const App: React.FC = () => {
       let newCache: Record<string, Channel[]> = {};
       let newCloudCats: Category[] = [];
 
-      // 1. Purani M3U Playlist Load Karna (Star Gold wali)
       try {
         const text = await fetchM3UText(DEFAULT_M3U);
         const parsed = parseM3U(text, 'cat-combined');
@@ -145,9 +142,8 @@ const App: React.FC = () => {
         console.log("M3U load failed");
       }
 
-      // 2. Nayi JSON Playlists (1200+ Channels)
+      // FanCode nikal kar baqi saari playlists
       const apiConfigs = [
-        { id: 'cat-fancode', name: 'FanCode LIVE', url: GROUP_A_URL, type: 'json', key: 'matches' },
         { id: 'cat-group-b', name: 'Hotstar LIVE', url: GROUP_B_URL, type: 'json', key: 'matches' },
         { id: 'cat-vip', name: '⚡ VIP Cricket', url: VIP_URL, type: 'json', key: 'channels' },
         { id: 'cat-sultan', name: '👑 Sultan VIP', url: SULTAN_URL, type: 'json', key: 'channels' },
@@ -163,7 +159,6 @@ const App: React.FC = () => {
               const items = Array.isArray(apiData) ? apiData : (apiData[config.key] || apiData.matches || apiData.channels || []);
               
               if (items.length > 0) {
-                  // Playlists mein add karna
                   const apiChannels: Channel[] = items.map((m: any, idx: number) => ({
                       id: `ch-${config.id}-${m.id || idx}`,
                       name: m.title || m.name || `Channel ${idx}`,
@@ -176,7 +171,6 @@ const App: React.FC = () => {
                   currentChannels = [...currentChannels, ...apiChannels];
                   newCloudCats.push({ id: config.id, name: config.name, playlistUrl: 'internal-api' });
 
-                  // Live Events Filter (Sirf sports wali cheezein upar dikhani hain)
                   const sportsKeywords = ['cricket', 'hockey', 'kabaddi', 'sport', 'wwe', 'tennis', 'football'];
                   const liveMatches: Match[] = items.filter((m: any) => {
                       if (config.key === 'matches') return true; 

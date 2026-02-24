@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { Match, Channel } from '../types';
 import { 
   ArrowLeft, AlertCircle, Settings, Sun, Volume2, 
-  Maximize, Minimize, PictureInPicture, Activity, Tv2, PlayCircle, Radio 
+  Maximize, Minimize, PictureInPicture, Activity, Tv2, PlayCircle, Radio, MonitorPlay
 } from 'lucide-react';
 import Hls from 'hls.js';
 
@@ -23,8 +23,10 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // 🚀 IS-IFRAME FLAG
-  const [isIframe, setIsIframe] = useState(false);
+  // 🚀 ENGINE SELECTION STATE
+  const [playerEngine, setPlayerEngine] = useState<'default' | 'clappr' | 'dplayer' | 'videojs'>('default');
+  const [isSultanIframe, setIsSultanIframe] = useState(false);
+  const [customIframeHtml, setCustomIframeHtml] = useState('');
   
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
@@ -49,6 +51,20 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     }
   }, [match, relatedChannels]);
 
+  // Jadoo: HTML Generator for 3rd Party Players
+  const generatePlayerHtml = (engine: string, url: string) => {
+    if (engine === 'clappr') {
+      return `<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/clappr@latest/dist/clappr.min.js"></script></head><body style="margin:0;background:#000;overflow:hidden;"><div id="player"></div><script>new Clappr.Player({source: "${url}", parentId: "#player", autoPlay: true, width: "100%", height: "100vh"});</script></body></html>`;
+    }
+    if (engine === 'dplayer') {
+      return `<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/hls.js/dist/hls.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/dplayer/1.27.1/DPlayer.min.js"></script></head><body style="margin:0;background:#000;overflow:hidden;"><div id="dplayer" style="width:100%;height:100vh;"></div><script>new DPlayer({container: document.getElementById('dplayer'), autoplay: true, video: {url: '${url}', type: 'hls'}});</script></body></html>`;
+    }
+    if (engine === 'videojs') {
+      return `<!DOCTYPE html><html><head><link href="https://vjs.zencdn.net/8.3.0/video-js.css" rel="stylesheet" /><script src="https://vjs.zencdn.net/8.3.0/video.min.js"></script></head><body style="margin:0;background:#000;overflow:hidden;"><video id="my-video" class="video-js vjs-default-skin vjs-fill" controls autoplay preload="auto" style="width:100%;height:100vh;"><source src="${url}" type="application/x-mpegURL" /></video><script>videojs('my-video');</script></body></html>`;
+    }
+    return '';
+  };
+
   useEffect(() => {
     if (!match || !match.streamUrl) return;
     
@@ -70,27 +86,35 @@ const PlayerView: React.FC<PlayerViewProps> = ({
         hlsRef.current = null;
     }
 
-    // 🚀 SULTAN'S MASTER LOGIC: Purani M3U ko pehchano
-    // Humari purani list ka ID 'cat-combined' se shuru hota hai.
-    const isOldPlaylist = match.id.includes('cat-combined');
+    // 🔒 LOCKED LOGIC: Sultan VIP ya Web Page Hamesha Iframe mein jayega
+    const isSultan = match.id.includes('cat-sultan');
+    const isWebPage = cleanUrl.includes('vaathala00.github.io') || cleanUrl.includes('.html') || cleanUrl.includes('.php');
     
-    // Agar purani list NAI hai (yani Jio, Sultan, VIP etc hain), to Iframe chalao!
-    const forceIframe = !isOldPlaylist;
-
-    if (forceIframe) {
-        console.log("🌐 JSON Playlist pakdi gayi! Iframe shuru ho raha hai:", cleanUrl);
-        setIsIframe(true);
+    if (isSultan || isWebPage) {
+        setIsSultanIframe(true);
+        setCustomIframeHtml('');
         setLoading(false);
         return; 
     } else {
-        setIsIframe(false);
+        setIsSultanIframe(false);
     }
 
-    // 🟢 PURANA HLS ENGINE (Sirf Purani M3U list ke liye chalega)
+    // 🚀 ENGINE SWITCHER LOGIC
+    if (playerEngine !== 'default') {
+        console.log(`🌐 Switching to ${playerEngine} Engine...`);
+        const html = generatePlayerHtml(playerEngine, cleanUrl);
+        setCustomIframeHtml(html);
+        setLoading(false);
+        return;
+    } else {
+        setCustomIframeHtml('');
+    }
+
+    // 🟢 AAPKA DEFAULT NATIVE PLAYER (HLS)
     const video = videoRef.current;
     if (!video) return;
 
-    console.log("🚀 Purana HLS Engine shuru ho raha hai...");
+    console.log("🚀 Default Native HLS Engine shuru ho raha hai...");
     if (Hls.isSupported()) {
       const hls = new Hls({
         debug: false,
@@ -133,7 +157,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     return () => {
       if (hlsRef.current) { hlsRef.current.destroy(); }
     };
-  }, [match?.streamUrl, match?.id]);
+  }, [match?.streamUrl, match?.id, playerEngine]); // playerEngine change hone par useEffect dobara chalega
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
@@ -142,7 +166,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!videoRef.current || isIframe) return;
+    if (!videoRef.current || isSultanIframe || customIframeHtml !== '') return;
     
     const diffY = touchStartY.current - e.touches[0].clientY;
     if (Math.abs(diffY) > 5) { 
@@ -178,6 +202,8 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     }
   };
 
+  const isAnyIframe = isSultanIframe || customIframeHtml !== '';
+
   if (!match) return <div className="h-screen bg-black text-white flex items-center justify-center">Loading...</div>;
 
   return (
@@ -185,15 +211,15 @@ const PlayerView: React.FC<PlayerViewProps> = ({
       
       <div 
         ref={containerRef} 
-        className={`relative w-full bg-black flex flex-col justify-center transition-all shrink-0 select-none ${isFullscreen && !isIframe ? 'h-screen fixed inset-0 z-50' : 'aspect-video'}`}
-        onTouchStart={!isIframe ? handleTouchStart : undefined}
-        onTouchMove={!isIframe ? handleTouchMove : undefined}
-        onClick={!isIframe ? () => setShowControls(!showControls) : undefined}
+        className={`relative w-full bg-black flex flex-col justify-center transition-all shrink-0 select-none ${isFullscreen && !isAnyIframe ? 'h-screen fixed inset-0 z-50' : 'aspect-video'}`}
+        onTouchStart={!isAnyIframe ? handleTouchStart : undefined}
+        onTouchMove={!isAnyIframe ? handleTouchMove : undefined}
+        onClick={!isAnyIframe ? () => setShowControls(!showControls) : undefined}
       >
         {loading && <div className="absolute inset-0 flex items-center justify-center z-20"><div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin"></div></div>}
         {error && <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-30 p-4 text-center"><AlertCircle className="w-10 h-10 text-red-500 mb-2" /><p className="text-red-400 font-bold text-sm">{error}</p></div>}
 
-        {isIframe ? (
+        {isSultanIframe ? (
           <>
             <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-auto">
               <button onClick={onBack} className="p-2 bg-black/50 rounded-full hover:bg-white/20 transition">
@@ -202,7 +228,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
               <h1 className="font-bold text-sm md:text-lg truncate px-4 drop-shadow-lg">{match.team1}</h1>
               <div className="w-10"></div>
             </div>
-            
+            {/* SULTAN VIP KA IFRAME */}
             <iframe 
               src={match.streamUrl.split('|')[0].trim()}
               className="w-full h-full border-none absolute inset-0 z-10 pt-16"
@@ -210,8 +236,26 @@ const PlayerView: React.FC<PlayerViewProps> = ({
               allowFullScreen
             />
           </>
+        ) : customIframeHtml !== '' ? (
+          <>
+             <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-auto">
+              <button onClick={onBack} className="p-2 bg-black/50 rounded-full hover:bg-white/20 transition">
+                <ArrowLeft className="w-6 h-6 text-white" />
+              </button>
+              <h1 className="font-bold text-sm md:text-lg truncate px-4 drop-shadow-lg">{match.team1}</h1>
+              <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-black/50 rounded-full pointer-events-auto"><Settings className="w-6 h-6 text-white" /></button>
+            </div>
+            {/* 🚀 3RD PARTY PLAYERS (Clappr, DPlayer, Video.js) */}
+            <iframe 
+              srcDoc={customIframeHtml}
+              className="w-full h-full border-none absolute inset-0 z-10 pt-16"
+              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+              allowFullScreen
+            />
+          </>
         ) : (
           <>
+            {/* 🟢 DEFAULT NATIVE PLAYER */}
             <video ref={videoRef} className="w-full h-full object-contain pointer-events-none z-10" playsInline style={{ filter: `brightness(${brightness}%)` }} />
 
             <div className={`absolute inset-0 flex flex-col justify-between bg-gradient-to-b from-black/80 via-transparent to-black/80 transition-opacity duration-300 z-40 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
@@ -232,18 +276,37 @@ const PlayerView: React.FC<PlayerViewProps> = ({
                 </div>
               </div>
             </div>
+          </>
+        )}
 
-            {showSettings && (
-              <div className="absolute right-0 top-0 bottom-0 w-64 bg-black/95 border-l border-white/10 z-50 p-4 flex flex-col animate-in slide-in-from-right" onClick={(e) => e.stopPropagation()}>
-                <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-sm text-gray-300">Settings</h3><button onClick={() => setShowSettings(false)} className="text-gray-400 font-bold pointer-events-auto">X</button></div>
+        {/* ⚙️ SETTINGS MENU (Player Switcher Yahan Hai!) */}
+        {showSettings && (
+          <div className="absolute right-0 top-0 bottom-0 w-64 bg-black/95 border-l border-white/10 z-50 p-4 flex flex-col animate-in slide-in-from-right" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-sm text-gray-300">Settings</h3><button onClick={() => setShowSettings(false)} className="text-gray-400 font-bold pointer-events-auto">X</button></div>
+            
+            {/* 🚀 ENGINE SWITCHER UI */}
+            {!isSultanIframe && (
+              <div className="mb-6">
+                <label className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-2"><MonitorPlay size={14}/> Player Engine</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => { setPlayerEngine('default'); setShowSettings(false); }} className={`px-2 py-2 rounded text-[10px] font-bold pointer-events-auto ${playerEngine === 'default' ? 'bg-green-500 text-black' : 'bg-white/10 text-white'}`}>Native (Fast)</button>
+                  <button onClick={() => { setPlayerEngine('clappr'); setShowSettings(false); }} className={`px-2 py-2 rounded text-[10px] font-bold pointer-events-auto ${playerEngine === 'clappr' ? 'bg-green-500 text-black' : 'bg-white/10 text-white'}`}>Clappr</button>
+                  <button onClick={() => { setPlayerEngine('dplayer'); setShowSettings(false); }} className={`px-2 py-2 rounded text-[10px] font-bold pointer-events-auto ${playerEngine === 'dplayer' ? 'bg-green-500 text-black' : 'bg-white/10 text-white'}`}>DPlayer</button>
+                  <button onClick={() => { setPlayerEngine('videojs'); setShowSettings(false); }} className={`px-2 py-2 rounded text-[10px] font-bold pointer-events-auto ${playerEngine === 'videojs' ? 'bg-green-500 text-black' : 'bg-white/10 text-white'}`}>JS Player</button>
+                </div>
+              </div>
+            )}
+
+            {playerEngine === 'default' && !isSultanIframe && (
+              <>
                 <label className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-2"><Activity size={14}/> Quality</label>
                 <div className="space-y-2 flex-1 overflow-y-auto">
                   <button onClick={() => { if(hlsRef.current) hlsRef.current.currentLevel = -1; setCurrentQuality(-1); setShowSettings(false); }} className={`w-full text-left px-3 py-2 rounded text-sm font-bold pointer-events-auto ${currentQuality === -1 ? 'bg-green-500 text-black' : 'bg-white/10 text-white'}`}>Auto</button>
                   {qualities.map((level, index) => <button key={index} onClick={() => { if(hlsRef.current) hlsRef.current.currentLevel = index; setCurrentQuality(index); setShowSettings(false); }} className={`w-full text-left px-3 py-2 rounded text-sm font-bold pointer-events-auto ${currentQuality === index ? 'bg-green-500 text-black' : 'bg-white/10 text-white'}`}>{level.height ? `${level.height}p` : `Quality ${index + 1}`}</button>)}
                 </div>
-              </div>
+              </>
             )}
-          </>
+          </div>
         )}
       </div>
 
