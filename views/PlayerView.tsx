@@ -23,6 +23,9 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   
+  // 🚀 IS-IFRAME FLAG
+  const [isIframe, setIsIframe] = useState(false);
+  
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
@@ -47,13 +50,11 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   }, [match, relatedChannels]);
 
   useEffect(() => {
-    if (!match || !match.streamUrl || !videoRef.current) return;
+    if (!match || !match.streamUrl) return;
     
     setError(null);
     setLoading(true);
-    const video = videoRef.current;
     
-    // URL Saaf Karna
     const rawUrl = match.streamUrl;
     const cleanUrl = rawUrl.split('|')[0].trim();
     
@@ -64,14 +65,32 @@ const PlayerView: React.FC<PlayerViewProps> = ({
        urlParams.forEach((value, key) => { customHeaders[key] = value; });
     }
 
-    // Purana HLS Engine Destroy Karna
     if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
     }
 
-    // 🚀 ORIGINAL HLS.JS PLAYER (No DASH, No Proxy)
-    console.log("🚀 Starting Original HLS Engine");
+    // 🚀 SULTAN'S MASTER LOGIC: Purani M3U ko pehchano
+    // Humari purani list ka ID 'cat-combined' se shuru hota hai.
+    const isOldPlaylist = match.id.includes('cat-combined');
+    
+    // Agar purani list NAI hai (yani Jio, Sultan, VIP etc hain), to Iframe chalao!
+    const forceIframe = !isOldPlaylist;
+
+    if (forceIframe) {
+        console.log("🌐 JSON Playlist pakdi gayi! Iframe shuru ho raha hai:", cleanUrl);
+        setIsIframe(true);
+        setLoading(false);
+        return; 
+    } else {
+        setIsIframe(false);
+    }
+
+    // 🟢 PURANA HLS ENGINE (Sirf Purani M3U list ke liye chalega)
+    const video = videoRef.current;
+    if (!video) return;
+
+    console.log("🚀 Purana HLS Engine shuru ho raha hai...");
     if (Hls.isSupported()) {
       const hls = new Hls({
         debug: false,
@@ -114,7 +133,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     return () => {
       if (hlsRef.current) { hlsRef.current.destroy(); }
     };
-  }, [match?.streamUrl]);
+  }, [match?.streamUrl, match?.id]);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
@@ -123,9 +142,9 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!videoRef.current) return;
-    const diffY = touchStartY.current - e.touches[0].clientY;
+    if (!videoRef.current || isIframe) return;
     
+    const diffY = touchStartY.current - e.touches[0].clientY;
     if (Math.abs(diffY) > 5) { 
       if (isVolumeArea.current) {
         let newVol = volume + (diffY > 0 ? 2 : -2);
@@ -166,44 +185,65 @@ const PlayerView: React.FC<PlayerViewProps> = ({
       
       <div 
         ref={containerRef} 
-        className={`relative w-full bg-black flex flex-col justify-center transition-all shrink-0 touch-none select-none ${isFullscreen ? 'h-screen fixed inset-0 z-50' : 'aspect-video'}`}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onClick={() => setShowControls(!showControls)}
+        className={`relative w-full bg-black flex flex-col justify-center transition-all shrink-0 select-none ${isFullscreen && !isIframe ? 'h-screen fixed inset-0 z-50' : 'aspect-video'}`}
+        onTouchStart={!isIframe ? handleTouchStart : undefined}
+        onTouchMove={!isIframe ? handleTouchMove : undefined}
+        onClick={!isIframe ? () => setShowControls(!showControls) : undefined}
       >
         {loading && <div className="absolute inset-0 flex items-center justify-center z-20"><div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin"></div></div>}
         {error && <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-30 p-4 text-center"><AlertCircle className="w-10 h-10 text-red-500 mb-2" /><p className="text-red-400 font-bold text-sm">{error}</p></div>}
 
-        <video ref={videoRef} className="w-full h-full object-contain pointer-events-none" playsInline style={{ filter: `brightness(${brightness}%)` }} />
-
-        <div className={`absolute inset-0 flex flex-col justify-between bg-gradient-to-b from-black/80 via-transparent to-black/80 transition-opacity duration-300 z-40 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-          <div className="flex items-center justify-between p-4" onClick={(e) => e.stopPropagation()}>
-            <button onClick={isFullscreen ? toggleFullscreen : onBack} className="p-2 bg-black/50 rounded-full pointer-events-auto"><ArrowLeft className="w-6 h-6 text-white" /></button>
-            <h1 className="font-bold text-sm md:text-lg truncate px-4 drop-shadow-lg">{match.team1}</h1>
-            <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-black/50 rounded-full pointer-events-auto"><Settings className="w-6 h-6 text-white" /></button>
-          </div>
-
-          <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col items-center opacity-50"><Sun className="w-5 h-5 mb-1"/> <span className="text-[10px] font-bold">{brightness}%</span></div>
-          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col items-center opacity-50"><Volume2 className="w-5 h-5 mb-1"/> <span className="text-[10px] font-bold">{volume}%</span></div>
-
-          <div className="flex items-center justify-between p-4" onClick={(e) => e.stopPropagation()}>
-            <span className="flex items-center gap-2 text-xs font-bold text-green-500 bg-green-500/20 px-2 py-1 rounded"><div className="w-2 h-2 bg-green-500 rounded-full animate-ping"></div> LIVE</span>
-            <div className="flex items-center gap-4">
-              <button onClick={togglePiP} className="p-2 hover:bg-white/20 rounded-full transition pointer-events-auto"><PictureInPicture className="w-6 h-6" /></button>
-              <button onClick={toggleFullscreen} className="p-2 hover:bg-white/20 rounded-full transition pointer-events-auto">{isFullscreen ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}</button>
+        {isIframe ? (
+          <>
+            <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-auto">
+              <button onClick={onBack} className="p-2 bg-black/50 rounded-full hover:bg-white/20 transition">
+                <ArrowLeft className="w-6 h-6 text-white" />
+              </button>
+              <h1 className="font-bold text-sm md:text-lg truncate px-4 drop-shadow-lg">{match.team1}</h1>
+              <div className="w-10"></div>
             </div>
-          </div>
-        </div>
+            
+            <iframe 
+              src={match.streamUrl.split('|')[0].trim()}
+              className="w-full h-full border-none absolute inset-0 z-10 pt-16"
+              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+              allowFullScreen
+            />
+          </>
+        ) : (
+          <>
+            <video ref={videoRef} className="w-full h-full object-contain pointer-events-none z-10" playsInline style={{ filter: `brightness(${brightness}%)` }} />
 
-        {showSettings && (
-          <div className="absolute right-0 top-0 bottom-0 w-64 bg-black/95 border-l border-white/10 z-50 p-4 flex flex-col animate-in slide-in-from-right" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-sm text-gray-300">Settings</h3><button onClick={() => setShowSettings(false)} className="text-gray-400 font-bold pointer-events-auto">X</button></div>
-            <label className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-2"><Activity size={14}/> Quality</label>
-            <div className="space-y-2 flex-1 overflow-y-auto">
-              <button onClick={() => { if(hlsRef.current) hlsRef.current.currentLevel = -1; setCurrentQuality(-1); setShowSettings(false); }} className={`w-full text-left px-3 py-2 rounded text-sm font-bold pointer-events-auto ${currentQuality === -1 ? 'bg-green-500 text-black' : 'bg-white/10 text-white'}`}>Auto</button>
-              {qualities.map((level, index) => <button key={index} onClick={() => { if(hlsRef.current) hlsRef.current.currentLevel = index; setCurrentQuality(index); setShowSettings(false); }} className={`w-full text-left px-3 py-2 rounded text-sm font-bold pointer-events-auto ${currentQuality === index ? 'bg-green-500 text-black' : 'bg-white/10 text-white'}`}>{level.height ? `${level.height}p` : `Quality ${index + 1}`}</button>)}
+            <div className={`absolute inset-0 flex flex-col justify-between bg-gradient-to-b from-black/80 via-transparent to-black/80 transition-opacity duration-300 z-40 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+              <div className="flex items-center justify-between p-4" onClick={(e) => e.stopPropagation()}>
+                <button onClick={isFullscreen ? toggleFullscreen : onBack} className="p-2 bg-black/50 rounded-full pointer-events-auto"><ArrowLeft className="w-6 h-6 text-white" /></button>
+                <h1 className="font-bold text-sm md:text-lg truncate px-4 drop-shadow-lg">{match.team1}</h1>
+                <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-black/50 rounded-full pointer-events-auto"><Settings className="w-6 h-6 text-white" /></button>
+              </div>
+
+              <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col items-center opacity-50"><Sun className="w-5 h-5 mb-1"/> <span className="text-[10px] font-bold">{brightness}%</span></div>
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col items-center opacity-50"><Volume2 className="w-5 h-5 mb-1"/> <span className="text-[10px] font-bold">{volume}%</span></div>
+
+              <div className="flex items-center justify-between p-4" onClick={(e) => e.stopPropagation()}>
+                <span className="flex items-center gap-2 text-xs font-bold text-green-500 bg-green-500/20 px-2 py-1 rounded"><div className="w-2 h-2 bg-green-500 rounded-full animate-ping"></div> LIVE</span>
+                <div className="flex items-center gap-4">
+                  <button onClick={togglePiP} className="p-2 hover:bg-white/20 rounded-full transition pointer-events-auto"><PictureInPicture className="w-6 h-6" /></button>
+                  <button onClick={toggleFullscreen} className="p-2 hover:bg-white/20 rounded-full transition pointer-events-auto">{isFullscreen ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}</button>
+                </div>
+              </div>
             </div>
-          </div>
+
+            {showSettings && (
+              <div className="absolute right-0 top-0 bottom-0 w-64 bg-black/95 border-l border-white/10 z-50 p-4 flex flex-col animate-in slide-in-from-right" onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-sm text-gray-300">Settings</h3><button onClick={() => setShowSettings(false)} className="text-gray-400 font-bold pointer-events-auto">X</button></div>
+                <label className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-2"><Activity size={14}/> Quality</label>
+                <div className="space-y-2 flex-1 overflow-y-auto">
+                  <button onClick={() => { if(hlsRef.current) hlsRef.current.currentLevel = -1; setCurrentQuality(-1); setShowSettings(false); }} className={`w-full text-left px-3 py-2 rounded text-sm font-bold pointer-events-auto ${currentQuality === -1 ? 'bg-green-500 text-black' : 'bg-white/10 text-white'}`}>Auto</button>
+                  {qualities.map((level, index) => <button key={index} onClick={() => { if(hlsRef.current) hlsRef.current.currentLevel = index; setCurrentQuality(index); setShowSettings(false); }} className={`w-full text-left px-3 py-2 rounded text-sm font-bold pointer-events-auto ${currentQuality === index ? 'bg-green-500 text-black' : 'bg-white/10 text-white'}`}>{level.height ? `${level.height}p` : `Quality ${index + 1}`}</button>)}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
