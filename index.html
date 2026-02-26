@@ -4,7 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="referrer" content="no-referrer-when-downgrade">
-    <title>CricPK - Live Sports</title>
+    <title>DarTV - Live Sports</title>
+    
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#121212">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="https://ui-avatars.com/api/?name=Dar+TV&background=00b865&color=fff&size=192">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://js.puter.com/v2/"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -66,6 +72,16 @@
                 window.location.href = `videojs.html?url=${streamUrl}&license=${license}`;
             }
         }
+    </script>
+
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(reg => console.log('DarTV App Engine Active!'))
+            .catch(err => console.log('App Engine Failed', err));
+        });
+      }
     </script>
 
 <script type="module" src="/index.tsx"></script>

@@ -5,7 +5,7 @@ import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 import LinkModal from './components/LinkModal';
 import FloatingPlayer from './components/FloatingPlayer';
-import { WifiOff, RefreshCw, Loader2 } from 'lucide-react';
+import { WifiOff, RefreshCw, Loader2, Activity } from 'lucide-react';
 
 const LiveEventsView = lazy(() => import('./views/LiveEvents'));
 const CategoriesView = lazy(() => import('./views/CategoriesView'));
@@ -50,12 +50,58 @@ const App: React.FC = () => {
   const [isCategoryLoading, setIsCategoryLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  // 📱 MOBILE HARDWARE BACK BUTTON LOGIC
+  useEffect(() => {
+    window.history.pushState(null, '', window.location.href);
+    const handleBackButton = () => {
+      if (activeView === 'player' || activeView === 'channel-detail' || activeView === 'radio') {
+        setActiveView(lastMainView);
+        window.history.pushState(null, '', window.location.href);
+      } else if (isSidebarOpen) {
+        setSidebarOpen(false);
+        window.history.pushState(null, '', window.location.href);
+      }
+    };
+    window.addEventListener('popstate', handleBackButton);
+    return () => window.removeEventListener('popstate', handleBackButton);
+  }, [activeView, lastMainView, isSidebarOpen]);
+
   useEffect(() => {
     const savedFavs = localStorage.getItem('cricpk_favorites');
     if (savedFavs) try { setFavorites(JSON.parse(savedFavs)); } catch (e) {}
+    
     const savedCustom = localStorage.getItem('cricpk_custom_playlists');
     if (savedCustom) try { setCustomCategories(JSON.parse(savedCustom)); } catch (e) {}
   }, []);
+
+  // 🚀 CUSTOM PLAYLIST MANAGER (ADD & DELETE)
+  const handleAddCustomPlaylist = (name: string, url: string) => {
+    const newCategory: Category = {
+      id: `cat-custom-${Date.now()}`,
+      name: name,
+      playlistUrl: url
+    };
+    
+    setCustomCategories(prev => {
+      const updated = [...prev, newCategory];
+      localStorage.setItem('cricpk_custom_playlists', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleDeleteCustomPlaylist = (id: string) => {
+    setCustomCategories(prev => {
+      const updated = prev.filter(cat => cat.id !== id);
+      localStorage.setItem('cricpk_custom_playlists', JSON.stringify(updated));
+      return updated;
+    });
+    // Agar cache mein uski list padi hai toh wo bhi clear kardo
+    setPlaylistCache(prev => {
+      const newCache = { ...prev };
+      delete newCache[id];
+      return newCache;
+    });
+  };
 
   const toggleFavorite = (channel: Channel) => {
     setFavorites(prev => {
@@ -80,17 +126,7 @@ const App: React.FC = () => {
   };
 
   const fetchInitialData = useCallback(async () => {
-    // 🚀 ZERO-SECOND LOAD ENGINE (Instantly load cached matches)
-    try {
-        const cachedMatches = localStorage.getItem('dartv_cache_matches');
-        const cachedCats = localStorage.getItem('dartv_cache_cats');
-        if (cachedMatches && cachedCats) {
-            setMatches(JSON.parse(cachedMatches));
-            setCloudCategories(JSON.parse(cachedCats));
-            setIsLoading(false); // 🔥 BOOM! Loading screen instantly removed!
-        }
-    } catch (e) {}
-
+    setIsLoading(true);
     setFetchError(null);
 
     try {
@@ -100,7 +136,6 @@ const App: React.FC = () => {
 
       newCloudCats.push({ id: 'cat-combined', name: '📺 All Live TV (Pirates)', playlistUrl: DEFAULT_M3U });
 
-      // Core sports API configs (Only fast JSONs)
       let apiConfigs: any[] = [
         { id: 'cat-sultan', name: '👑 Sultan VIP', url: SULTAN_URL, type: 'json', key: 'channels' },
         { id: 'cat-group-b', name: 'Hotstar LIVE', url: GROUP_B_URL, type: 'json', key: 'matches' },
@@ -109,10 +144,6 @@ const App: React.FC = () => {
         { id: 'cat-vast', name: '📺 Vast Channels', url: VAST_URL, type: 'json', key: 'channels' }
       ];
 
-      apiConfigs.forEach(c => newCloudCats.push({ id: c.id, name: c.name, playlistUrl: c.url }));
-      newCloudCats.push({ id: 'cat-global-radio', name: '📻 Global FM Radio', playlistUrl: '' });
-
-      // 🌟 ADMIN CLOUD ENGINE (Deferred Loading for Speed)
       try {
           const adminUrl = `https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/main/admin_playlists.json?t=${Date.now()}`;
           const adminRes = await fetch(adminUrl);
@@ -120,11 +151,12 @@ const App: React.FC = () => {
           if (adminRes.ok) {
               const externalPlaylists = await adminRes.json();
               externalPlaylists.forEach((list: any, idx: number) => {
-                  // Direct push to categories! Does NOT pre-load on startup.
-                  newCloudCats.push({
+                  apiConfigs.push({
                       id: `cat-admin-${idx}`,
                       name: list.name,
-                      playlistUrl: list.url
+                      url: list.url,
+                      type: 'auto',
+                      key: 'channels'
                   });
               });
           }
@@ -132,9 +164,10 @@ const App: React.FC = () => {
           console.log("Admin playlists file not found yet.");
       }
 
+      apiConfigs.forEach(c => newCloudCats.push({ id: c.id, name: c.name, playlistUrl: c.url }));
+      newCloudCats.push({ id: 'cat-global-radio', name: '📻 Global FM Radio', playlistUrl: '' });
       setCloudCategories(newCloudCats);
 
-      // Fetch only Core Sports JSONs
       const apiResults = await Promise.all(
         apiConfigs.map(async (config) => {
           try {
@@ -142,6 +175,24 @@ const App: React.FC = () => {
             let parsedData = null;
             if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
                 parsedData = JSON.parse(text);
+            } else {
+                const lines = text.split('\n');
+                const chs = [];
+                let currentInfo: any = null;
+                for (let i = 0; i < lines.length; i++) {
+                  const line = lines[i].trim();
+                  if (line.startsWith('#EXTINF:')) {
+                    const logoMatch = line.match(/tvg-logo="([^"]+)"/);
+                    const nameSplit = line.split(',');
+                    const name = nameSplit.length > 1 ? nameSplit.pop()?.trim() || 'Unknown' : 'Unknown';
+                    let logo = logoMatch ? logoMatch[1] : `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=2E8B57&color=fff`;
+                    currentInfo = { title: name, src: logo };
+                  } else if (line.length > 0 && !line.startsWith('#') && currentInfo) {
+                    chs.push({ title: currentInfo.title, src: currentInfo.src, url: line });
+                    currentInfo = null;
+                  }
+                }
+                parsedData = { channels: chs };
             }
             return { config, data: parsedData };
           } catch (err) {
@@ -154,22 +205,17 @@ const App: React.FC = () => {
 
       apiResults.forEach(({ config, data: apiData }) => {
         if (!apiData) return;
-        
-        const items = Array.isArray(apiData) ? apiData : (apiData[config.key] || apiData.matches || apiData.channels || apiData.data || []);
+        const items = Array.isArray(apiData) ? apiData : (apiData[config.key] || apiData.matches || apiData.channels || []);
         
         if (items.length > 0) {
             const apiChannels: Channel[] = items.map((m: any, idx: number) => {
                 const isUpcoming = String(m.status).toUpperCase() === 'UPCOMING';
-                const cName = m.title || m.name || m.channel_name || m.ch_name || m.channel || `Channel ${idx}`;
-                const cLogo = m.src || m.logo || m.banner || m.channel_logo || m.logo_url || m.icon || m.thumbnail || `https://ui-avatars.com/api/?name=${encodeURIComponent(cName)}&background=00b865&color=fff`;
-                const cUrl = m.adfree_url || m.dai_url || m.url || m.streamUrl || m.stream_url || m.link || m.channel_url || m.file || '';
-
                 return {
                     id: `ch-${config.id}-${m.match_id || m.id || idx}`,
-                    name: String(isUpcoming ? `⏳ (Upcoming) ${cName}` : cName),
-                    logo: String(cLogo),
+                    name: String(isUpcoming ? `⏳ (Upcoming) ${m.title || m.name}` : (m.title || m.name || m.match_name || `Channel ${idx}`)),
+                    logo: String(m.src || m.logo || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name || 'TV')}`),
                     categoryId: config.id,
-                    streamUrl: String(cUrl)
+                    streamUrl: String(m.adfree_url || m.dai_url || m.url || m.streamUrl || '')
                 };
             }).filter(c => c.streamUrl !== '');
 
@@ -233,36 +279,26 @@ const App: React.FC = () => {
               else { status = 'Live'; isHot = true; }
           }
 
-          const cName1 = String(m.team_1 || m.title || m.name || m.channel_name || 'Team 1');
-          
           return {
               id: m.match_id || m.id || `live-gen-${idx}`,
               sport: m.event_category || m.sport || m.category || 'Sports',
               league: m.event_name || m.configName || 'Live Event',
-              team1: cName1,
+              team1: String(m.team_1 || m.title || m.name || 'Team 1'),
               team2: String(m.team_2 || 'LIVE'),
-              team1Logo: String(m.src || m.logo || m.team_1_flag || m.logo_url || m.icon || `https://ui-avatars.com/api/?name=${encodeURIComponent(cName1)}`),
-              team2Logo: String(m.src || m.logo || m.team_2_flag || m.logo_url || m.icon || `https://ui-avatars.com/api/?name=VS`),
+              team1Logo: String(m.src || m.logo || m.team_1_flag || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.team_1 || m.title || m.name || 'T1')}`),
+              team2Logo: String(m.src || m.logo || m.team_2_flag || `https://ui-avatars.com/api/?name=VS`),
               status: status,
               time: parsedTime > 0 ? String(parsedTime) : 'Live Now',
               isHot: isHot,
-              streamUrl: m.adfree_url || m.dai_url || m.url || m.streamUrl || m.link || m.stream_url || '',
+              streamUrl: m.adfree_url || m.dai_url || m.url || m.streamUrl,
               multiLinks: allSportsLinks 
           };
       });
 
-      const finalMatches = [...genericMatches];
-      
-      // Update UI & Cache Silently
-      setMatches(finalMatches);
+      setMatches([...genericMatches]);
       setAllChannels(currentChannels);
       setPlaylistCache(newCache);
       setIsLoading(false);
-
-      try {
-          localStorage.setItem('dartv_cache_matches', JSON.stringify(finalMatches));
-          localStorage.setItem('dartv_cache_cats', JSON.stringify(newCloudCats));
-      } catch (e) {}
 
     } catch (error: any) {
       console.error("Data fetch failed", error);
@@ -293,21 +329,14 @@ const App: React.FC = () => {
         let parsedChannels: Channel[] = [];
         if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
             const apiData = JSON.parse(text);
-            const items = Array.isArray(apiData) ? apiData : (apiData.channels || apiData.matches || apiData.data || []);
-            
-            parsedChannels = items.map((m: any, idx: number) => {
-                const cName = m.title || m.name || m.channel_name || m.ch_name || m.channel || `Channel ${idx}`;
-                const cLogo = m.src || m.logo || m.banner || m.channel_logo || m.logo_url || m.icon || m.thumbnail || `https://ui-avatars.com/api/?name=${encodeURIComponent(cName)}&background=00b865&color=fff`;
-                const cUrl = m.adfree_url || m.dai_url || m.url || m.streamUrl || m.stream_url || m.link || m.channel_url || m.file || '';
-
-                return {
-                    id: `ch-${category.id}-${m.match_id || m.id || idx}`,
-                    name: String(cName),
-                    logo: String(cLogo),
-                    categoryId: category.id,
-                    streamUrl: String(cUrl)
-                };
-            }).filter((c: any) => c.streamUrl !== '');
+            const items = Array.isArray(apiData) ? apiData : (apiData.channels || apiData.matches || []);
+            parsedChannels = items.map((m: any, idx: number) => ({
+                id: `ch-${category.id}-${m.match_id || m.id || idx}`,
+                name: String(m.title || m.name || `Channel ${idx}`),
+                logo: String(m.src || m.logo || m.banner || `https://ui-avatars.com/api/?name=TV`),
+                categoryId: category.id,
+                streamUrl: String(m.adfree_url || m.dai_url || m.url || m.streamUrl || '')
+            })).filter(c => c.streamUrl !== '');
         } else {
             const lines = text.split('\n');
             let currentInfo: any = null;
@@ -345,7 +374,23 @@ const App: React.FC = () => {
   };
 
   const renderView = () => {
-    if (isLoading) return <div className="flex flex-col items-center justify-center h-full gap-4"><div className="w-10 h-10 border-4 border-[#00b865] border-t-transparent rounded-full animate-spin" /></div>;
+    if (isLoading) return (
+      <div className="flex flex-col items-center justify-center h-full bg-[#121212] z-50 fixed inset-0">
+        <div className="flex flex-col items-center animate-in fade-in zoom-in duration-700">
+           <div className="w-20 h-20 bg-[#00b865]/10 rounded-full flex items-center justify-center mb-4 border border-[#00b865]/30 shadow-[0_0_30px_rgba(0,184,101,0.2)]">
+             <Activity className="w-10 h-10 text-[#00b865] animate-pulse" />
+           </div>
+           <h1 className="text-4xl font-black tracking-widest text-white mb-8 shadow-black drop-shadow-lg">
+             DAR<span className="text-[#00b865]">TV</span>
+           </h1>
+           <div className="w-48 h-1.5 bg-white/5 rounded-full overflow-hidden relative">
+              <div className="absolute top-0 left-0 h-full bg-gradient-to-r from-[#00b865] to-green-400 w-full animate-[progress_1.5s_ease-in-out_infinite] origin-left"></div>
+           </div>
+           <p className="mt-6 text-[10px] text-gray-500 font-bold uppercase tracking-[0.3em]">Starting Engine...</p>
+        </div>
+      </div>
+    );
+
     if (fetchError) return <div className="flex flex-col items-center justify-center h-full p-8 text-center gap-6"><WifiOff className="w-10 h-10 text-red-500" /><p className="text-white">{fetchError}</p><button onClick={fetchInitialData} className="bg-white text-black px-8 py-4 rounded-2xl"><RefreshCw className="w-4 h-4 inline" /> Reconnect</button></div>;
 
     if (globalSearchQuery.trim().length > 0) {
@@ -359,7 +404,17 @@ const App: React.FC = () => {
         {activeView === 'privacy' && <PrivacyPolicyView />}
         {activeView === 'radio' && <RadioView onBack={() => setActiveView('categories')} />}
         {activeView === 'live-events' && <LiveEventsView matches={matches} onSelectMatch={(m) => { setLastMainView('live-events'); setSelectedMatch(m); setActiveView('player'); }} />}
-        {activeView === 'categories' && <CategoriesView onSelectCategory={handleCategorySelect} favoritesCount={favorites.length} cloudCategories={cloudCategories} customCategories={customCategories} onAddCustom={() => {}} onDeleteCustom={() => {}} />}
+        
+        {/* 🚀 CUSTOM CATEGORIES PROPS PASSED HERE */}
+        {activeView === 'categories' && <CategoriesView 
+            onSelectCategory={handleCategorySelect} 
+            favoritesCount={favorites.length} 
+            cloudCategories={cloudCategories} 
+            customCategories={customCategories} 
+            onAddCustom={handleAddCustomPlaylist} 
+            onDeleteCustom={handleDeleteCustomPlaylist} 
+        />}
+
         {activeView === 'channel-detail' && <ChannelListView channels={categoryChannels} category={selectedCategory} loading={isCategoryLoading} onBack={() => setActiveView('categories')} onSelectChannel={(ch) => { setLastMainView('channel-detail'); playChannel(ch); }} />}
         {activeView === 'player' && <PlayerView match={selectedMatch} onBack={() => setActiveView(lastMainView)} relatedChannels={categoryChannels.length > 0 ? categoryChannels.slice(0, 40) : allChannels.slice(0, 40)} onSelectRelated={playChannel} />}
       </Suspense>
@@ -385,6 +440,14 @@ const App: React.FC = () => {
       </div>
       {floatingMatch && <FloatingPlayer match={floatingMatch} onExpand={() => { setSelectedMatch(floatingMatch); setFloatingMatch(null); setActiveView('player'); }} onClose={() => setFloatingMatch(null)} />}
       {showLinkModal && <LinkModal match={selectedMatch} onClose={() => setShowLinkModal(false)} onSelect={() => {}} />}
+      
+      <style>{`
+        @keyframes progress {
+          0% { transform: scaleX(0); opacity: 1; }
+          50% { transform: scaleX(1); opacity: 1; }
+          100% { transform: scaleX(1); opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 };
