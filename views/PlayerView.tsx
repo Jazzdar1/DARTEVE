@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Match, Channel } from '../types';
-import { ArrowLeft, AlertCircle, Settings, Sun, Volume2, Maximize, Minimize, Tv2, PlayCircle, Radio, Server, RefreshCw } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Settings, Sun, Volume2, Maximize, Minimize, Tv2, PlayCircle, Radio, Server, RefreshCw, ShieldAlert } from 'lucide-react';
 import Hls from 'hls.js';
 
 interface PlayerViewProps {
@@ -21,18 +21,17 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
   const fallbackTimerRef = useRef<any>(null); 
   const hasPlayedRef = useRef(false); 
 
-  // 🎛️ PRO CONTROLS STATE
   const [volume, setVolume] = useState(1);
   const [brightness, setBrightness] = useState(1);
   const [qualityLevels, setQualityLevels] = useState<any[]>([]);
   const [currentQuality, setCurrentQuality] = useState<number>(-1);
   const [indicator, setIndicator] = useState<{show: boolean, type: 'vol'|'bri', val: number}>({show: false, type: 'vol', val: 0});
   
-  // Touch Gestures Refs
   const touchStartY = useRef(0);
   const touchStartX = useRef(0);
   const isLeftHalf = useRef(false);
   const initialVal = useRef(0);
+  const isDragging = useRef(false);
   const indicatorTimer = useRef<any>(null);
 
   const [currentStream, setCurrentStream] = useState<string>('');
@@ -71,7 +70,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
         setLoading(true);
         return engines[idx + 1];
       } else {
-        setError("All players failed. Stream link is dead or offline.");
+        setError("All players failed. Stream offline.");
         setLoading(false);
         return prev;
       }
@@ -95,9 +94,12 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
     retryCount.current = 0;
     clearFallbackTimer();
     
+    // Increased timeout for Iframes as they naturally take longer
+    const timeoutDuration = (currentStream.includes('.html') || currentStream.includes('.php') || match?.id.includes('cat-sultan')) ? 45000 : 25000;
+    
     fallbackTimerRef.current = setTimeout(() => {
         if (isMounted && !hasPlayedRef.current) handleFallback();
-    }, 25000);
+    }, timeoutDuration);
 
     const handleSuccess = () => {
         if (isMounted) {
@@ -140,7 +142,11 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
       hls.attachMedia(video);
       
       hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => { 
-          setQualityLevels(data.levels);
+          if (data.levels && data.levels.length > 0) {
+              setQualityLevels(data.levels);
+          } else {
+              setQualityLevels([{ height: 'Auto', bitrate: 0 }]); 
+          }
           setCurrentQuality(-1);
           video.play().catch(()=>console.log("Autoplay block")); 
       });
@@ -171,18 +177,20 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
     };
   }, [currentStream, playerEngine, match, handleFallback]);
 
-  // 🤏 TOUCH GESTURES (Fixed with touch-none so browser doesn't scroll)
-  const handleTouchStart = (e: React.TouchEvent) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
      if (isSultanIframe || playerEngine !== 'default') return; 
-     touchStartY.current = e.touches[0].clientY;
-     touchStartX.current = e.touches[0].clientX;
+     isDragging.current = true;
+     touchStartY.current = e.clientY;
+     touchStartX.current = e.clientX;
      isLeftHalf.current = touchStartX.current < window.innerWidth / 2;
      initialVal.current = isLeftHalf.current ? brightness : volume;
+     e.currentTarget.setPointerCapture(e.pointerId); 
   };
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-     if (isSultanIframe || playerEngine !== 'default') return;
-     const deltaY = touchStartY.current - e.touches[0].clientY;
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+     if (!isDragging.current || isSultanIframe || playerEngine !== 'default') return;
+     
+     const deltaY = touchStartY.current - e.clientY;
      const sensitivity = 0.005; 
      let newVal = initialVal.current + (deltaY * sensitivity);
      newVal = Math.max(0, Math.min(1, newVal));
@@ -195,6 +203,11 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
         if (videoRef.current) videoRef.current.volume = newVal;
         showInd('vol', newVal);
      }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+     isDragging.current = false;
+     e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   const showInd = (type: 'vol'|'bri', val: number) => {
@@ -211,22 +224,19 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
       }
   };
 
-  // 📱 AUTO LANDSCAPE LOCK ADDED
   const toggleFullscreen = async () => {
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
       await containerRef.current.requestFullscreen().catch(e => console.log(e));
       setIsFullscreen(true);
-      // Try forcing landscape mode
       try {
         if (window.screen && window.screen.orientation && window.screen.orientation.lock) {
           await window.screen.orientation.lock('landscape');
         }
-      } catch (e) { console.log("Orientation lock failed or not supported."); }
+      } catch (e) { console.log("Orientation lock failed."); }
     } else {
       document.exitFullscreen();
       setIsFullscreen(false);
-      // Unlock rotation
       try {
         if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
           window.screen.orientation.unlock();
@@ -242,7 +252,20 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
     <div className="flex flex-col h-screen bg-[#0f1115] overflow-hidden text-white">
       <div ref={containerRef} key={match.id} className={`relative w-full bg-black flex flex-col justify-center select-none ${isFullscreen && !isSultanIframe ? 'h-screen fixed inset-0 z-50' : 'aspect-video'}`}>
         
-        {loading && <div className="absolute inset-0 flex items-center justify-center z-40 bg-black/60"><div className="w-10 h-10 border-4 border-[#00b865] border-t-transparent rounded-full animate-spin"></div></div>}
+        {/* 🔥 PREMIUM LOADING SCREEN WITH VIP STATUS */}
+        {loading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/80 backdrop-blur-sm">
+            <div className="w-12 h-12 border-4 border-[#00b865] border-t-transparent rounded-full animate-spin mb-4 shadow-[0_0_15px_#00b865]"></div>
+            {isSultanIframe ? (
+               <div className="flex flex-col items-center gap-2">
+                 <ShieldAlert className="w-6 h-6 text-yellow-500 animate-pulse" />
+                 <p className="text-yellow-500 font-bold text-[10px] uppercase tracking-widest text-center">Bypassing Security...<br/>Connecting to VIP Server</p>
+               </div>
+            ) : (
+               <p className="text-[#00b865] font-bold text-[10px] uppercase tracking-widest animate-pulse">Loading Stream...</p>
+            )}
+          </div>
+        )}
         
         {error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-50 p-4 text-center">
@@ -254,12 +277,10 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
           </div>
         )}
 
-        {/* 🪄 BRIGHTNESS OVERLAY */}
         {!isSultanIframe && playerEngine === 'default' && (
            <div className="absolute inset-0 bg-black pointer-events-none z-20" style={{ opacity: 1 - brightness }}></div>
         )}
 
-        {/* 📊 INDICATOR */}
         {indicator.show && (
            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/60 text-white px-6 py-4 rounded-xl flex flex-col items-center gap-2 z-50">
                {indicator.type === 'vol' ? <Volume2 className="w-8 h-8 text-[#00b865]" /> : <Sun className="w-8 h-8 text-yellow-500" />}
@@ -270,19 +291,22 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
            </div>
         )}
 
-        {/* 🚀 SULTAN IFRAME - (Sandbox Removed for 100% Lag Free Experience) */}
+        {/* 🚀 HIGH-PRIORITY SULTAN IFRAME */}
         {isSultanIframe ? (
           <>
             <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-auto">
               <button onClick={onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition"><ArrowLeft className="w-6 h-6 text-white" /></button>
             </div>
             <iframe 
+                key={`iframe-${currentStream}`}
                 src={currentStream.split('|')[0].trim()} 
                 className="w-full h-full border-none absolute inset-0 z-10 bg-black" 
                 allow="autoplay; fullscreen; encrypted-media; picture-in-picture" 
                 allowFullScreen 
                 referrerPolicy="no-referrer" 
-                // Removed Sandbox to let native player hardware acceleration run perfectly!
+                loading="eager"
+                // @ts-ignore - React doesn't natively support fetchpriority typing yet, but it works in DOM
+                fetchpriority="high"
                 onLoad={() => { setLoading(false); clearFallbackTimer(); if (error) setError(null); }} 
             />
           </>
@@ -292,21 +316,24 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
               <button onClick={onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition"><ArrowLeft className="w-6 h-6 text-white" /></button>
               <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-black/50 rounded-full"><Settings className="w-6 h-6 text-white" /></button>
             </div>
-            <iframe srcDoc={customIframeHtml} className="w-full h-full border-none absolute inset-0 z-10 bg-black" allow="autoplay; fullscreen" allowFullScreen onLoad={() => { setLoading(false); clearFallbackTimer(); if (error) setError(null); }} />
+            <iframe key={`custom-${currentStream}`} srcDoc={customIframeHtml} className="w-full h-full border-none absolute inset-0 z-10 bg-black" allow="autoplay; fullscreen" allowFullScreen onLoad={() => { setLoading(false); clearFallbackTimer(); if (error) setError(null); }} />
           </>
         ) : (
           <>
             <video ref={videoRef} className="w-full h-full object-contain z-10" playsInline />
             
-            {/* ✋ TOUCH GESTURE LAYER - (Added touch-none CSS to fix swipe issues) */}
             <div 
                className="absolute inset-0 z-30 cursor-pointer touch-none" 
-               onClick={() => setShowControls(!showControls)}
-               onTouchStart={handleTouchStart}
-               onTouchMove={handleTouchMove}
+               onClick={(e) => {
+                  if (Math.abs(touchStartY.current - e.clientY) < 10) setShowControls(!showControls);
+               }}
+               onPointerDown={handlePointerDown}
+               onPointerMove={handlePointerMove}
+               onPointerUp={handlePointerUp}
+               onPointerCancel={handlePointerUp}
+               onPointerLeave={handlePointerUp}
             ></div>
 
-            {/* CONTROLS */}
             <div className={`absolute inset-0 flex flex-col justify-between bg-gradient-to-b from-black/80 via-transparent to-black/80 transition-opacity duration-300 z-40 pointer-events-none ${showControls ? 'opacity-100' : 'opacity-0'}`}>
               <div className="flex items-center justify-between p-4 pointer-events-auto">
                 <button onClick={isFullscreen ? toggleFullscreen : onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition"><ArrowLeft className="w-6 h-6 text-white" /></button>
@@ -321,7 +348,6 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
           </>
         )}
 
-        {/* ⚙️ PRO SETTINGS PANEL */}
         {showSettings && (
           <div className="absolute right-0 top-0 bottom-0 w-64 bg-black/95 border-l border-white/10 z-50 p-4 flex flex-col overflow-y-auto animate-in slide-in-from-right pointer-events-auto shadow-2xl">
             <div className="flex justify-between items-center mb-6 pb-2 border-b border-white/10">
@@ -336,8 +362,8 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
                         <button onClick={() => changeQuality(-1)} className={`text-left px-3 py-2 rounded text-xs font-bold transition ${currentQuality === -1 ? 'bg-[#00b865] text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'}`}>Auto</button>
                         {qualityLevels.map((level, index) => (
                             <button key={index} onClick={() => changeQuality(index)} className={`text-left px-3 py-2 rounded text-xs font-bold transition flex justify-between ${currentQuality === index ? 'bg-[#00b865] text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'}`}>
-                                <span>{level.height ? `${level.height}p` : `Level ${index + 1}`}</span>
-                                {level.bitrate && <span className="text-[10px] opacity-60">{Math.round(level.bitrate / 1000)} kbps</span>}
+                                <span>{level.height ? `${level.height}p` : `Stream ${index + 1}`}</span>
+                                {level.bitrate ? <span className="text-[10px] opacity-60">{Math.round(level.bitrate / 1000)} kbps</span> : null}
                             </button>
                         ))}
                     </div>
