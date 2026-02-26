@@ -1,17 +1,20 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { View, Match, Category, Channel } from './types';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
-import LiveEventsView from './views/LiveEvents';
-import CategoriesView from './views/CategoriesView';
-import ChannelListView from './views/ChannelList';
-import PlayerView from './views/PlayerView';
 import LinkModal from './components/LinkModal';
 import FloatingPlayer from './components/FloatingPlayer';
-import AboutView from './views/AboutView';
-import PrivacyPolicyView from './views/PrivacyPolicyView';
-import { WifiOff, RefreshCw } from 'lucide-react';
+import { WifiOff, RefreshCw, Loader2 } from 'lucide-react';
+
+const LiveEventsView = lazy(() => import('./views/LiveEvents'));
+const CategoriesView = lazy(() => import('./views/CategoriesView'));
+const ChannelListView = lazy(() => import('./views/ChannelList'));
+const PlayerView = lazy(() => import('./views/PlayerView'));
+const AboutView = lazy(() => import('./views/AboutView'));
+const PrivacyPolicyView = lazy(() => import('./views/PrivacyPolicyView'));
+// 📻 NAYA RADIO VIEW IMPORT
+const RadioView = lazy(() => import('./views/RadioView'));
 
 const BASE_GITHUB = 'https://raw.githubusercontent.com/FunctionError/PiratesTv/main';
 const DEFAULT_M3U = `${BASE_GITHUB}/combined_playlist.m3u`;
@@ -25,8 +28,8 @@ const VAST_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group
 const GROUP_B_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-B/main/live_matches_B.json';
 
 const App: React.FC = () => {
-  const [activeView, setActiveView] = useState<View>('live-events');
-  const [lastMainView, setLastMainView] = useState<View>('live-events');
+  const [activeView, setActiveView] = useState<View | 'radio'>('live-events');
+  const [lastMainView, setLastMainView] = useState<View | 'radio'>('live-events');
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   
   const [matches, setMatches] = useState<Match[]>([]);
@@ -78,27 +81,6 @@ const App: React.FC = () => {
     }
   };
 
-  const parseM3U = (text: string, categoryId: string) => {
-    const lines = text.split('\n');
-    const channels: Channel[] = [];
-    let currentInfo: any = null;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line.startsWith('#EXTINF:')) {
-        const logoMatch = line.match(/tvg-logo="([^"]+)"/);
-        const nameSplit = line.split(',');
-        const name = nameSplit.length > 1 ? nameSplit.pop()?.trim() || 'Unknown' : 'Unknown';
-        let logo = logoMatch ? logoMatch[1] : `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=2E8B57&color=fff`;
-        currentInfo = { name, logo };
-      } else if (line.length > 0 && !line.startsWith('#') && currentInfo) {
-        channels.push({ id: `ch-${categoryId}-${channels.length}`, name: String(currentInfo.name), logo: String(currentInfo.logo), categoryId: categoryId, streamUrl: line });
-        currentInfo = null;
-      }
-    }
-    return { channels };
-  };
-
   const fetchInitialData = useCallback(async () => {
     setIsLoading(true);
     setFetchError(null);
@@ -120,6 +102,9 @@ const App: React.FC = () => {
       ];
 
       apiConfigs.forEach(c => newCloudCats.push({ id: c.id, name: c.name, playlistUrl: c.url }));
+      
+      // 📻 VIRTUAL RADIO CARD
+      newCloudCats.push({ id: 'cat-global-radio', name: '📻 Global FM Radio', playlistUrl: '' });
       setCloudCategories(newCloudCats);
 
       const apiResults = await Promise.all(
@@ -177,7 +162,6 @@ const App: React.FC = () => {
                  premiumLinks.push({ 
                      name: isSultan ? `⭐ ${ch.name} (VIP)` : `${ch.name} (${catName})`, 
                      url: ch.streamUrl, 
-                     // 🔥 STRICT IFRAME RULE FOR SULTAN:
                      type: isSultan ? 'Iframe' : (isM3u8 ? 'Video' : 'Iframe'),
                      isSultan: isSultan
                  });
@@ -252,7 +236,7 @@ const App: React.FC = () => {
       setIsLoading(false);
 
     } catch (error: any) {
-      console.error("Background data fetch failed", error);
+      console.error("Data fetch failed", error);
       setIsLoading(false);
       if (matches.length === 0) setFetchError("Please check your internet connection.");
     }
@@ -261,6 +245,12 @@ const App: React.FC = () => {
   useEffect(() => { fetchInitialData(); }, [fetchInitialData]);
 
   const handleCategorySelect = async (category: Category) => {
+    // 📻 THE RADIO ROUTER: Agar radio pe click ho toh naya view kholo
+    if (category.id === 'cat-global-radio') {
+      setActiveView('radio' as View);
+      return;
+    }
+
     setSelectedCategory(category);
     setActiveView('channel-detail');
     
@@ -290,8 +280,26 @@ const App: React.FC = () => {
                 streamUrl: String(m.adfree_url || m.dai_url || m.url || m.streamUrl || '')
             })).filter(c => c.streamUrl !== '');
         } else {
-            const parsed = parseM3U(text, category.id);
-            parsedChannels = parsed.channels;
+            const parseM3U = (t: string, catId: string) => {
+                const lines = t.split('\n');
+                const chs: Channel[] = [];
+                let currentInfo: any = null;
+                for (let i = 0; i < lines.length; i++) {
+                  const line = lines[i].trim();
+                  if (line.startsWith('#EXTINF:')) {
+                    const logoMatch = line.match(/tvg-logo="([^"]+)"/);
+                    const nameSplit = line.split(',');
+                    const name = nameSplit.length > 1 ? nameSplit.pop()?.trim() || 'Unknown' : 'Unknown';
+                    let logo = logoMatch ? logoMatch[1] : `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=2E8B57&color=fff`;
+                    currentInfo = { name, logo };
+                  } else if (line.length > 0 && !line.startsWith('#') && currentInfo) {
+                    chs.push({ id: `ch-${catId}-${chs.length}`, name: String(currentInfo.name), logo: String(currentInfo.logo), categoryId: catId, streamUrl: line });
+                    currentInfo = null;
+                  }
+                }
+                return { channels: chs };
+            };
+            parsedChannels = parseM3U(text, category.id).channels;
         }
         
         if (parsedChannels.length > 0) {
@@ -318,36 +326,38 @@ const App: React.FC = () => {
 
     if (globalSearchQuery.trim().length > 0) {
       const searchResults = allChannels.filter(c => String(c.name || '').toLowerCase().includes(globalSearchQuery.toLowerCase())).slice(0, 100);
-      return <ChannelListView channels={searchResults} category={{ id: 'search', name: `Search Results`, playlistUrl: '' }} loading={false} onBack={() => setGlobalSearchQuery('')} onSelectChannel={(ch) => { setGlobalSearchQuery(''); setLastMainView('categories'); playChannel(ch); }} />;
+      return <Suspense fallback={<div className="flex justify-center p-10"><Loader2 className="w-8 h-8 animate-spin text-[#00b865]" /></div>}><ChannelListView channels={searchResults} category={{ id: 'search', name: `Search Results`, playlistUrl: '' }} loading={false} onBack={() => setGlobalSearchQuery('')} onSelectChannel={(ch) => { setGlobalSearchQuery(''); setLastMainView('categories'); playChannel(ch); }} /></Suspense>;
     }
 
-    switch (activeView) {
-      case 'about': return <AboutView />;
-      case 'privacy': return <PrivacyPolicyView />;
-      case 'live-events': return <LiveEventsView matches={matches} onSelectMatch={(m) => { setLastMainView('live-events'); setSelectedMatch(m); setActiveView('player'); }} />;
-      case 'categories': return <CategoriesView onSelectCategory={handleCategorySelect} favoritesCount={favorites.length} cloudCategories={cloudCategories} customCategories={customCategories} onAddCustom={() => {}} onDeleteCustom={() => {}} />;
-      case 'channel-detail': return <ChannelListView channels={categoryChannels} category={selectedCategory} loading={isCategoryLoading} onBack={() => setActiveView('categories')} onSelectChannel={(ch) => { setLastMainView('channel-detail'); playChannel(ch); }} />;
-      case 'player': return <PlayerView match={selectedMatch} onBack={() => setActiveView(lastMainView)} relatedChannels={categoryChannels.length > 0 ? categoryChannels.slice(0, 40) : allChannels.slice(0, 40)} onSelectRelated={playChannel} />;
-      default: return <LiveEventsView matches={matches} onSelectMatch={(m) => { setLastMainView('live-events'); setSelectedMatch(m); setActiveView('player'); }} />;
-    }
+    return (
+      <Suspense fallback={<div className="flex justify-center items-center h-full"><Loader2 className="w-10 h-10 animate-spin text-[#00b865]" /></div>}>
+        {activeView === 'about' && <AboutView />}
+        {activeView === 'privacy' && <PrivacyPolicyView />}
+        {activeView === 'radio' && <RadioView onBack={() => setActiveView('categories')} />}
+        {activeView === 'live-events' && <LiveEventsView matches={matches} onSelectMatch={(m) => { setLastMainView('live-events'); setSelectedMatch(m); setActiveView('player'); }} />}
+        {activeView === 'categories' && <CategoriesView onSelectCategory={handleCategorySelect} favoritesCount={favorites.length} cloudCategories={cloudCategories} customCategories={customCategories} onAddCustom={() => {}} onDeleteCustom={() => {}} />}
+        {activeView === 'channel-detail' && <ChannelListView channels={categoryChannels} category={selectedCategory} loading={isCategoryLoading} onBack={() => setActiveView('categories')} onSelectChannel={(ch) => { setLastMainView('channel-detail'); playChannel(ch); }} />}
+        {activeView === 'player' && <PlayerView match={selectedMatch} onBack={() => setActiveView(lastMainView)} relatedChannels={categoryChannels.length > 0 ? categoryChannels.slice(0, 40) : allChannels.slice(0, 40)} onSelectRelated={playChannel} />}
+      </Suspense>
+    );
   };
 
   const isFullPlayer = activeView === 'player';
 
   return (
     <div className="flex flex-row h-screen overflow-hidden bg-[#121212] text-white">
-      {!isFullPlayer && <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} activeView={activeView} onNavigate={(v) => { setActiveView(v); setLastMainView(v); setSidebarOpen(false); }} />}
+      {!isFullPlayer && <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} activeView={activeView as View} onNavigate={(v) => { setActiveView(v); setLastMainView(v); setSidebarOpen(false); }} />}
       <div className="flex flex-col flex-1 relative min-w-0">
         {!isFullPlayer && (
           <Header 
-            title={activeView === 'categories' ? 'Playlists' : activeView === 'channel-detail' ? (selectedCategory?.name || 'Channels') : 'DAR TEVE'} 
-            onOpenSidebar={() => setSidebarOpen(true)} showBack={activeView === 'channel-detail'} onBack={() => setActiveView('categories')} searchQuery={globalSearchQuery} onSearchChange={setGlobalSearchQuery} 
+            title={activeView === 'categories' ? 'Playlists' : activeView === 'channel-detail' ? (selectedCategory?.name || 'Channels') : activeView === 'radio' ? 'Virtual Radio' : 'DAR TEVE'} 
+            onOpenSidebar={() => setSidebarOpen(true)} showBack={activeView === 'channel-detail' || activeView === 'radio'} onBack={() => setActiveView('categories')} searchQuery={globalSearchQuery} onSearchChange={setGlobalSearchQuery} 
           />
         )}
         <main className={`flex-1 overflow-y-auto scrollbar-hide ${!isFullPlayer ? 'pb-24 md:pb-6' : ''}`}>
           <div className={`${!isFullPlayer ? 'max-w-[1600px] mx-auto' : 'w-full h-full'}`}>{renderView()}</div>
         </main>
-        {!isFullPlayer && <BottomNav activeView={activeView === 'channel-detail' ? 'categories' : activeView} onViewChange={(v) => { setActiveView(v); setLastMainView(v); }} />}
+        {!isFullPlayer && <BottomNav activeView={(activeView === 'channel-detail' || activeView === 'radio') ? 'categories' : activeView as View} onViewChange={(v) => { setActiveView(v); setLastMainView(v); }} />}
       </div>
       {floatingMatch && <FloatingPlayer match={floatingMatch} onExpand={() => { setSelectedMatch(floatingMatch); setFloatingMatch(null); setActiveView('player'); }} onClose={() => setFloatingMatch(null)} />}
       {showLinkModal && <LinkModal match={selectedMatch} onClose={() => setShowLinkModal(false)} onSelect={() => {}} />}
