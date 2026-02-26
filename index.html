@@ -11,6 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="https://ui-avatars.com/api/?name=Dar+TV&background=00b865&color=fff&size=192">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://js.puter.com/v2/"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -27,7 +28,6 @@
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
         
-        /* Video.js Dark Mode Overrides */
         .video-js .vjs-control-bar { background-color: rgba(15, 17, 21, 0.9) !important; }
         .video-js .vjs-big-play-button { background-color: rgba(34, 197, 94, 0.9) !important; border: none !important; border-radius: 12px !important; }
         .video-js .vjs-play-progress { background-color: #22c55e !important; }
@@ -58,16 +58,48 @@
 <body class="bg-[#0f1115]">
     <div id="root"></div>
 
+    <button id="pwa-install-btn" style="display: none; position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 99999; background: #00b865; color: black; padding: 14px 28px; border-radius: 50px; font-weight: 900; cursor: pointer; border: none; box-shadow: 0 10px 25px rgba(0,184,101,0.5); font-family: 'Inter', sans-serif; width: max-content; font-size: 14px; letter-spacing: 1px;">
+        📲 INSTALL DAR TV APP
+    </button>
+
     <script>
+        // SMART INSTALL BUTTON LOGIC (Auto-Hide)
+        let deferredPrompt;
+        const installBtn = document.getElementById('pwa-install-btn');
+
+        // Check if already installed / running as app
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+        if (!isStandalone) {
+            window.addEventListener('beforeinstallprompt', (e) => {
+                e.preventDefault();
+                deferredPrompt = e;
+                installBtn.style.display = 'block'; // Sirf browser mein show karo
+            });
+
+            installBtn.addEventListener('click', async () => {
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    const { outcome } = await deferredPrompt.userChoice;
+                    if (outcome === 'accepted') {
+                        installBtn.style.display = 'none'; // Accept karte hi gayab
+                    }
+                    deferredPrompt = null;
+                }
+            });
+
+            window.addEventListener('appinstalled', () => {
+                installBtn.style.display = 'none'; // OS se install hote hi gayab
+            });
+        }
+
+        // Original Match Player Logic
         window.playMatch = function(match) {
             console.log("Attempting to play:", match);
             const streamUrl = encodeURIComponent(match.url);
-            
             if (match.type === "HLS" || !match.is_drm) {
-                // FanCode/Jio: Open DPlayer
                 window.location.href = `dplayer.html?url=${streamUrl}`;
             } else {
-                // Hotstar/Prime: Open Video.js with License
                 const license = encodeURIComponent(match.license_url || '');
                 window.location.href = `videojs.html?url=${streamUrl}&license=${license}`;
             }
