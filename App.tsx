@@ -24,7 +24,7 @@ const VIP_URL = `${API_BASE}/vip_cricket.json`;
 const SULTAN_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/refs/heads/main/sultan_cricket.json';
 const VAST_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/refs/heads/main/dartv_vast_channels.json';
 const GROUP_B_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-B/main/live_matches_B.json';
-const adminUrl = `https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/main/admin_playlists.json?t=${Date.now()}`;
+
 const App: React.FC = () => {
   const [activeView, setActiveView] = useState<View | 'radio'>('live-events');
   const [lastMainView, setLastMainView] = useState<View | 'radio'>('live-events');
@@ -80,7 +80,17 @@ const App: React.FC = () => {
   };
 
   const fetchInitialData = useCallback(async () => {
-    setIsLoading(true);
+    // 🚀 ZERO-SECOND LOAD ENGINE (Instantly load cached matches)
+    try {
+        const cachedMatches = localStorage.getItem('dartv_cache_matches');
+        const cachedCats = localStorage.getItem('dartv_cache_cats');
+        if (cachedMatches && cachedCats) {
+            setMatches(JSON.parse(cachedMatches));
+            setCloudCategories(JSON.parse(cachedCats));
+            setIsLoading(false); // 🔥 BOOM! Loading screen instantly removed!
+        }
+    } catch (e) {}
+
     setFetchError(null);
 
     try {
@@ -90,6 +100,7 @@ const App: React.FC = () => {
 
       newCloudCats.push({ id: 'cat-combined', name: '📺 All Live TV (Pirates)', playlistUrl: DEFAULT_M3U });
 
+      // Core sports API configs (Only fast JSONs)
       let apiConfigs: any[] = [
         { id: 'cat-sultan', name: '👑 Sultan VIP', url: SULTAN_URL, type: 'json', key: 'channels' },
         { id: 'cat-group-b', name: 'Hotstar LIVE', url: GROUP_B_URL, type: 'json', key: 'matches' },
@@ -98,34 +109,32 @@ const App: React.FC = () => {
         { id: 'cat-vast', name: '📺 Vast Channels', url: VAST_URL, type: 'json', key: 'channels' }
       ];
 
-      // 🌟 THE ADMIN CLOUD CONFIG ENGINE (Bina Code Chhuwe Playlists Add Karne Wala Jadoo) 🌟
+      apiConfigs.forEach(c => newCloudCats.push({ id: c.id, name: c.name, playlistUrl: c.url }));
+      newCloudCats.push({ id: 'cat-global-radio', name: '📻 Global FM Radio', playlistUrl: '' });
+
+      // 🌟 ADMIN CLOUD ENGINE (Deferred Loading for Speed)
       try {
-          // Yeh URL aapke GitHub se direct admin_playlists.json parhega
-          // '?t=' bypasses cache taake aapko instant update mile!
           const adminUrl = `https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/main/admin_playlists.json?t=${Date.now()}`;
           const adminRes = await fetch(adminUrl);
           
           if (adminRes.ok) {
               const externalPlaylists = await adminRes.json();
               externalPlaylists.forEach((list: any, idx: number) => {
-                  apiConfigs.push({
+                  // Direct push to categories! Does NOT pre-load on startup.
+                  newCloudCats.push({
                       id: `cat-admin-${idx}`,
                       name: list.name,
-                      url: list.url,
-                      type: 'auto', // App automatically M3U ya JSON detect kar legi!
-                      key: 'channels'
+                      playlistUrl: list.url
                   });
               });
           }
       } catch (err) {
-          console.log("Admin playlists file not found yet. Ready when you create it!");
+          console.log("Admin playlists file not found yet.");
       }
 
-      apiConfigs.forEach(c => newCloudCats.push({ id: c.id, name: c.name, playlistUrl: c.url }));
-      newCloudCats.push({ id: 'cat-global-radio', name: '📻 Global FM Radio', playlistUrl: '' });
       setCloudCategories(newCloudCats);
 
-      // Baqi saara API aur M3U Fetching ka purana logic wahi hai...
+      // Fetch only Core Sports JSONs
       const apiResults = await Promise.all(
         apiConfigs.map(async (config) => {
           try {
@@ -133,25 +142,6 @@ const App: React.FC = () => {
             let parsedData = null;
             if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
                 parsedData = JSON.parse(text);
-            } else {
-                // Agar M3U hai toh usay JSON jaisa structure de do
-                const lines = text.split('\n');
-                const chs = [];
-                let currentInfo: any = null;
-                for (let i = 0; i < lines.length; i++) {
-                  const line = lines[i].trim();
-                  if (line.startsWith('#EXTINF:')) {
-                    const logoMatch = line.match(/tvg-logo="([^"]+)"/);
-                    const nameSplit = line.split(',');
-                    const name = nameSplit.length > 1 ? nameSplit.pop()?.trim() || 'Unknown' : 'Unknown';
-                    let logo = logoMatch ? logoMatch[1] : `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=2E8B57&color=fff`;
-                    currentInfo = { title: name, src: logo };
-                  } else if (line.length > 0 && !line.startsWith('#') && currentInfo) {
-                    chs.push({ title: currentInfo.title, src: currentInfo.src, url: line });
-                    currentInfo = null;
-                  }
-                }
-                parsedData = { channels: chs };
             }
             return { config, data: parsedData };
           } catch (err) {
@@ -164,17 +154,22 @@ const App: React.FC = () => {
 
       apiResults.forEach(({ config, data: apiData }) => {
         if (!apiData) return;
-        const items = Array.isArray(apiData) ? apiData : (apiData[config.key] || apiData.matches || apiData.channels || []);
+        
+        const items = Array.isArray(apiData) ? apiData : (apiData[config.key] || apiData.matches || apiData.channels || apiData.data || []);
         
         if (items.length > 0) {
             const apiChannels: Channel[] = items.map((m: any, idx: number) => {
                 const isUpcoming = String(m.status).toUpperCase() === 'UPCOMING';
+                const cName = m.title || m.name || m.channel_name || m.ch_name || m.channel || `Channel ${idx}`;
+                const cLogo = m.src || m.logo || m.banner || m.channel_logo || m.logo_url || m.icon || m.thumbnail || `https://ui-avatars.com/api/?name=${encodeURIComponent(cName)}&background=00b865&color=fff`;
+                const cUrl = m.adfree_url || m.dai_url || m.url || m.streamUrl || m.stream_url || m.link || m.channel_url || m.file || '';
+
                 return {
                     id: `ch-${config.id}-${m.match_id || m.id || idx}`,
-                    name: String(isUpcoming ? `⏳ (Upcoming) ${m.title || m.name}` : (m.title || m.name || m.match_name || `Channel ${idx}`)),
-                    logo: String(m.src || m.logo || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name || 'TV')}`),
+                    name: String(isUpcoming ? `⏳ (Upcoming) ${cName}` : cName),
+                    logo: String(cLogo),
                     categoryId: config.id,
-                    streamUrl: String(m.adfree_url || m.dai_url || m.url || m.streamUrl || '')
+                    streamUrl: String(cUrl)
                 };
             }).filter(c => c.streamUrl !== '');
 
@@ -187,7 +182,6 @@ const App: React.FC = () => {
         }
       });
 
-      // 🧠 SMART ENGINE: Find ALL Sports Channels from ALL Playlists (Sultan Priority)
       const allSportsLinks: any[] = [];
       const sportsKeywords = ['sports', 'ptv', 'willow', 'ten', 'astro', 'sony', 'a sports', 'geo super', 'espn', 'fox', 'supersport', 'bein'];
       const blockKeywords = ['movie', 'max', 'gold', 'cinema', 'action', 'entertainment', 'jalsha', 'pravah', 'colors', 'star plus', 'zee tv']; 
@@ -239,26 +233,36 @@ const App: React.FC = () => {
               else { status = 'Live'; isHot = true; }
           }
 
+          const cName1 = String(m.team_1 || m.title || m.name || m.channel_name || 'Team 1');
+          
           return {
               id: m.match_id || m.id || `live-gen-${idx}`,
               sport: m.event_category || m.sport || m.category || 'Sports',
               league: m.event_name || m.configName || 'Live Event',
-              team1: String(m.team_1 || m.title || m.name || 'Team 1'),
+              team1: cName1,
               team2: String(m.team_2 || 'LIVE'),
-              team1Logo: String(m.src || m.logo || m.team_1_flag || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.team_1 || m.title || m.name || 'T1')}`),
-              team2Logo: String(m.src || m.logo || m.team_2_flag || `https://ui-avatars.com/api/?name=VS`),
+              team1Logo: String(m.src || m.logo || m.team_1_flag || m.logo_url || m.icon || `https://ui-avatars.com/api/?name=${encodeURIComponent(cName1)}`),
+              team2Logo: String(m.src || m.logo || m.team_2_flag || m.logo_url || m.icon || `https://ui-avatars.com/api/?name=VS`),
               status: status,
               time: parsedTime > 0 ? String(parsedTime) : 'Live Now',
               isHot: isHot,
-              streamUrl: m.adfree_url || m.dai_url || m.url || m.streamUrl,
+              streamUrl: m.adfree_url || m.dai_url || m.url || m.streamUrl || m.link || m.stream_url || '',
               multiLinks: allSportsLinks 
           };
       });
 
-      setMatches([...genericMatches]);
+      const finalMatches = [...genericMatches];
+      
+      // Update UI & Cache Silently
+      setMatches(finalMatches);
       setAllChannels(currentChannels);
       setPlaylistCache(newCache);
       setIsLoading(false);
+
+      try {
+          localStorage.setItem('dartv_cache_matches', JSON.stringify(finalMatches));
+          localStorage.setItem('dartv_cache_cats', JSON.stringify(newCloudCats));
+      } catch (e) {}
 
     } catch (error: any) {
       console.error("Data fetch failed", error);
@@ -289,16 +293,22 @@ const App: React.FC = () => {
         let parsedChannels: Channel[] = [];
         if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
             const apiData = JSON.parse(text);
-            const items = Array.isArray(apiData) ? apiData : (apiData.channels || apiData.matches || []);
-            parsedChannels = items.map((m: any, idx: number) => ({
-                id: `ch-${category.id}-${m.match_id || m.id || idx}`,
-                name: String(m.title || m.name || `Channel ${idx}`),
-                logo: String(m.src || m.logo || m.banner || `https://ui-avatars.com/api/?name=TV`),
-                categoryId: category.id,
-                streamUrl: String(m.adfree_url || m.dai_url || m.url || m.streamUrl || '')
-            })).filter(c => c.streamUrl !== '');
+            const items = Array.isArray(apiData) ? apiData : (apiData.channels || apiData.matches || apiData.data || []);
+            
+            parsedChannels = items.map((m: any, idx: number) => {
+                const cName = m.title || m.name || m.channel_name || m.ch_name || m.channel || `Channel ${idx}`;
+                const cLogo = m.src || m.logo || m.banner || m.channel_logo || m.logo_url || m.icon || m.thumbnail || `https://ui-avatars.com/api/?name=${encodeURIComponent(cName)}&background=00b865&color=fff`;
+                const cUrl = m.adfree_url || m.dai_url || m.url || m.streamUrl || m.stream_url || m.link || m.channel_url || m.file || '';
+
+                return {
+                    id: `ch-${category.id}-${m.match_id || m.id || idx}`,
+                    name: String(cName),
+                    logo: String(cLogo),
+                    categoryId: category.id,
+                    streamUrl: String(cUrl)
+                };
+            }).filter((c: any) => c.streamUrl !== '');
         } else {
-            // Parses any Custom M3U Added via Cloud
             const lines = text.split('\n');
             let currentInfo: any = null;
             for (let i = 0; i < lines.length; i++) {
