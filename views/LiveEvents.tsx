@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Match } from '../types';
-import { Check, Dribbble, Target, Trophy, Globe, Activity, Circle, Gamepad2 } from 'lucide-react';
+import { Check, Trophy, Target, Globe, Activity, Circle, Gamepad2, Lock, Car, Flag } from 'lucide-react';
 
 interface LiveEventsProps {
   matches: Match[];
@@ -10,17 +10,16 @@ interface LiveEventsProps {
 const LiveEventsView: React.FC<LiveEventsProps> = ({ matches, onSelectMatch }) => {
   const [now, setNow] = useState(Date.now());
   const [activeSport, setActiveSport] = useState<string>('All');
-  const [activeStatus, setActiveStatus] = useState<string>('All'); // All, Live, Recent, Upcoming
+  const [activeStatus, setActiveStatus] = useState<string>('All');
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
   }, []);
 
-  // 🧠 PARSER: Categorize matches strictly according to App.tsx
   const { filteredMatches, counts, sportsList } = useMemo(() => {
     const st = { all: 0, live: 0, recent: 0, upcoming: 0 };
-    const sportsCounts: Record<string, number> = { All: 0, Cricket: 0, Football: 0, Basketball: 0, Boxing: 0, Other: 0 };
+    const sportsCounts: Record<string, number> = { All: 0, Football: 0, Cricket: 0, Baseball: 0, 'Formula 1': 0, Basketball: 0, Boxing: 0, Other: 0 };
     
     const processed: any[] = [];
 
@@ -31,6 +30,8 @@ const LiveEventsView: React.FC<LiveEventsProps> = ({ matches, onSelectMatch }) =
 
       if (sport.includes('CRICKET')) cleanSport = 'Cricket';
       else if (sport.includes('FOOTBALL') || sport.includes('SOCCER')) cleanSport = 'Football';
+      else if (sport.includes('BASEBALL')) cleanSport = 'Baseball';
+      else if (sport.includes('FORMULA 1') || sport.includes('F1') || sport.includes('RACING')) cleanSport = 'Formula 1';
       else if (sport.includes('BASKETBALL')) cleanSport = 'Basketball';
       else if (sport.includes('BOXING') || sport.includes('WWE') || sport.includes('WRESTLING')) cleanSport = 'Boxing';
 
@@ -40,7 +41,6 @@ const LiveEventsView: React.FC<LiveEventsProps> = ({ matches, onSelectMatch }) =
         targetTime = timeNum < 10000000000 ? timeNum * 1000 : timeNum;
       }
 
-      // Determine Final Status strictly
       let finalStatus = 'Live';
       if (status === 'COMPLETED' || status === 'ENDED' || status === 'RECENT') {
           finalStatus = 'Recent';
@@ -48,7 +48,6 @@ const LiveEventsView: React.FC<LiveEventsProps> = ({ matches, onSelectMatch }) =
           finalStatus = 'Upcoming';
       }
 
-      // Update Counts
       sportsCounts.All++;
       sportsCounts[cleanSport] = (sportsCounts[cleanSport] || 0) + 1;
       
@@ -76,99 +75,92 @@ const LiveEventsView: React.FC<LiveEventsProps> = ({ matches, onSelectMatch }) =
     };
   }, [matches, now, activeSport, activeStatus]);
 
-  // 🕒 Formatting Helpers (Matches CRICfy format exactly)
   const formatTime = (ts: number) => {
     if (!ts) return "";
-    const d = new Date(ts);
-    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase(); // "01:30 am"
-  };
-
-  const formatDate = (ts: number) => {
-    if (!ts) return "";
-    const d = new Date(ts);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    return `${day}/${month}/${d.getFullYear()}`; // "26/02/2026"
-  };
-
-  const getCountdown = (targetTime: number) => {
-    if (!targetTime) return "";
-    const diff = targetTime - now;
-    if (diff <= 0) return "Starting Now...";
-    
+    const diff = Math.max(0, ts - now);
     const h = Math.floor(diff / (1000 * 60 * 60));
     const m = String(Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))).padStart(2, '0');
     const s = String(Math.floor((diff % (1000 * 60)) / 1000)).padStart(2, '0');
-    
-    if (h > 0) return `Match Starting in ${h}:${m}:${s}`;
-    return `Match Starting in ${m}:${s}`;
+    return h > 0 ? `${String(h).padStart(2, '0')}:${m}:${s}` : `${m}:${s}`;
   };
 
   const getSportIcon = (sportName: string) => {
     switch(sportName) {
-      case 'All': return <Globe className="w-8 h-8 text-white" strokeWidth={1.5} />;
-      case 'Cricket': return <Trophy className="w-8 h-8 text-white" strokeWidth={1.5} />;
-      case 'Football': return <Gamepad2 className="w-8 h-8 text-white" strokeWidth={1.5} />;
-      case 'Basketball': return <Dribbble className="w-8 h-8 text-white" strokeWidth={1.5} />;
-      case 'Boxing': return <Target className="w-8 h-8 text-white" strokeWidth={1.5} />;
-      default: return <Activity className="w-8 h-8 text-white" strokeWidth={1.5} />;
+      case 'All': return <Globe className="w-7 h-7 text-white" strokeWidth={1.5} />;
+      case 'Football': return <Circle className="w-7 h-7 text-white border-dashed border-2 rounded-full" strokeWidth={1.5} />;
+      case 'Cricket': return <Trophy className="w-7 h-7 text-white" strokeWidth={1.5} />;
+      case 'Baseball': return <Target className="w-7 h-7 text-white" strokeWidth={1.5} />;
+      case 'Formula 1': return <Car className="w-7 h-7 text-white" strokeWidth={1.5} />;
+      case 'Basketball': return <Activity className="w-7 h-7 text-white" strokeWidth={1.5} />;
+      default: return <Gamepad2 className="w-7 h-7 text-white" strokeWidth={1.5} />;
     }
   };
 
+  const displaySports = ['All', 'Football', 'Cricket', 'Baseball', 'Formula 1', 'Basketball', 'Boxing'];
+
   return (
-    <div className="bg-[#121212] min-h-screen pb-24 font-sans select-none">
+    <div className="bg-[#0a0c10] min-h-screen pb-24 font-sans select-none">
       
-      {/* 🚀 CUSTOM DARTV BANNER */}
-      <div className="px-4 pt-4 mb-4">
-        <div className="border border-[#00b865] rounded-lg p-3 bg-[#1a1c20] flex items-center justify-center text-center shadow-lg">
-          <span className="text-[12px] md:text-sm font-medium text-gray-200">
-            Welcome to DarTV. We are always updating our database to serve you better. If you have any suggestion you can reach us on WhatsApp <span className="text-[#00b865] font-bold">7006686584</span>. Stay tuned, love you all!
-          </span>
+      {/* 🌟 1. SCROLLING LOCK BANNER (DarTV Name Fixed) */}
+      <div className="px-3 pt-3 mb-5">
+        <div className="border border-[#00b865]/60 rounded-full px-3 py-1.5 bg-[#121418] flex items-center shadow-md">
+          <Lock className="w-3.5 h-3.5 text-[#e1b12c] mr-2 shrink-0" />
+          <marquee className="text-[12px] font-semibold text-gray-200 tracking-wide" scrollamount="4">
+            use latest version always Tap here 🌟🌟 Welcome to DarTV. Stay tuned for the best live sports experience!
+          </marquee>
         </div>
       </div>
 
-      {/* 🏀 SPORTS ICONS */}
-      <div className="flex gap-4 px-4 overflow-x-auto scrollbar-hide mb-6">
-        {['All', 'Cricket', 'Football', 'Boxing', 'Basketball'].map(sport => {
+      {/* ⚽ 2. SPORT CIRCLES WITH RED BADGES */}
+      <div className="flex gap-4 px-4 overflow-x-auto scrollbar-hide mb-6 pb-2">
+        {displaySports.map(sport => {
            if (sport !== 'All' && sportsList[sport] === 0) return null; 
            const countStr = sportsList[sport] > 99 ? '99+' : sportsList[sport];
+           const isActive = activeSport === sport;
            
            return (
-            <button 
-              key={sport}
+            <div 
+              key={sport} 
               onClick={() => { setActiveSport(sport); setActiveStatus('All'); }}
-              className={`relative flex-shrink-0 flex flex-col items-center justify-center w-16 h-16 rounded-2xl border-2 transition-all ${activeSport === sport ? 'bg-[#1a1c20] border-[#00b865]' : 'bg-transparent border-gray-600'}`}
+              className="flex flex-col items-center gap-1.5 cursor-pointer shrink-0"
             >
-              <div className="absolute -top-2 -right-2 bg-red-600 border-2 border-[#121212] rounded-full w-6 h-6 flex items-center justify-center text-[10px] font-bold text-white shadow-lg z-10">
-                {countStr}
+              <div className={`relative flex items-center justify-center w-[60px] h-[60px] rounded-full border-2 transition-all ${isActive ? 'border-[#00b865] bg-[#00b865]/10' : 'border-gray-600 bg-[#121418]'}`}>
+                {/* Red Notification Badge */}
+                <div className="absolute -top-1.5 -right-1.5 bg-[#ff4757] border-2 border-[#0a0c10] rounded-full min-w-[22px] h-[22px] flex items-center justify-center text-[9px] font-black text-white px-1 z-10">
+                  {countStr}
+                </div>
+                {getSportIcon(sport)}
               </div>
-              {getSportIcon(sport)}
-            </button>
+              <span className={`text-[10px] font-bold tracking-wider ${isActive ? 'text-white' : 'text-gray-400'}`}>{sport}</span>
+            </div>
            );
         })}
       </div>
 
-      {/* 🎯 STATUS FILTER PILLS */}
-      <div className="flex gap-3 px-4 overflow-x-auto scrollbar-hide mb-6 border-b border-white/5 pb-3">
+      {/* 🏷️ 3. WHITE CHECK FILTER PILLS */}
+      <div className="flex gap-2.5 px-3 overflow-x-auto scrollbar-hide mb-5 pb-3">
         {[
           { id: 'All', label: 'All', count: counts.all },
           { id: 'Live', label: 'Live', count: counts.live },
-          { id: 'Recent', label: 'Recent', count: counts.recent },
-          { id: 'Upcoming', label: 'Upcoming', count: counts.upcoming }
-        ].map(filter => (
-          <button
-            key={filter.id}
-            onClick={() => setActiveStatus(filter.id)}
-            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full border transition-all whitespace-nowrap ${activeStatus === filter.id ? 'border-[#00b865] bg-[#00b865]/10 text-white' : 'border-gray-600 text-gray-400 bg-transparent'}`}
-          >
-            {activeStatus === filter.id && <Check className="w-4 h-4 text-[#00b865]" />}
-            <span className="text-sm font-medium">{filter.label} ({filter.count})</span>
-          </button>
-        ))}
+          { id: 'Upcoming', label: 'Upcoming', count: counts.upcoming },
+          { id: 'Recent', label: 'Ended', count: counts.recent }
+        ].map(filter => {
+          const isActive = activeStatus === filter.id;
+          return (
+            <button
+              key={filter.id}
+              onClick={() => setActiveStatus(filter.id)}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full border transition-all whitespace-nowrap text-[13px] font-semibold ${isActive ? 'border-white bg-[#1a1c24] text-white' : 'border-gray-700 text-gray-400 bg-transparent'}`}
+            >
+              {isActive && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+              <span>{filter.label} ({filter.count})</span>
+            </button>
+          )
+        })}
       </div>
 
-      {/* 📺 EXACT CRICFY MATCH CARDS GRID */}
-      <div className="px-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {/* 🏏 4. STACKED MATCH CARDS */}
+      <div className="px-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {filteredMatches.length > 0 ? (
           filteredMatches.map((match, idx) => {
             const isLive = match.finalStatus === 'Live';
@@ -179,58 +171,57 @@ const LiveEventsView: React.FC<LiveEventsProps> = ({ matches, onSelectMatch }) =
               <button 
                 key={`${match.id}-${idx}`}
                 onClick={() => onSelectMatch(match)}
-                className="w-full flex flex-col bg-[#1e2024] border border-[#00b865] rounded-[16px] overflow-hidden hover:bg-[#25282d] transition-colors text-left"
+                className="w-full relative flex flex-col bg-[#121418] border border-[#00b865] rounded-2xl overflow-hidden hover:bg-[#1a1c24] transition-colors text-left shadow-lg mb-1"
               >
-                {/* Header (Sport | League) */}
-                <div className="flex justify-center items-center py-2 bg-black/40 border-b border-white/5 gap-2">
-                  <Activity className="w-3.5 h-3.5 text-gray-400" />
-                  <span className="text-[11px] font-medium text-gray-300 truncate px-2 tracking-wide">{match.cleanSport} | {match.league}</span>
+                {match.isHot && (
+                  <div className="absolute top-3 -right-8 bg-red-600 text-white text-[10px] font-black py-0.5 w-[110px] text-center rotate-45 shadow-md uppercase tracking-wider z-10">
+                    Hot
+                  </div>
+                )}
+
+                <div className="flex justify-center items-center py-2 bg-black/30 border-b border-white/5">
+                  <span className="text-[11.5px] font-semibold text-gray-200 tracking-wide pr-4 pl-2">
+                    🏏 {match.cleanSport} | {match.league}
+                  </span>
                 </div>
 
-                {/* Match Info Body */}
-                <div className="flex items-center justify-between p-5">
-                  
-                  {/* Team 1 */}
-                  <div className="flex flex-col items-center gap-2 w-[30%]">
-                    <img src={match.team1Logo} className="w-12 h-12 md:w-14 md:h-14 object-contain" onError={(e) => e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(match.team1)}&background=1e2024&color=fff`} />
-                    <span className="text-[13px] md:text-sm font-semibold text-white text-center line-clamp-1">{match.team1}</span>
+                <div className="flex flex-row items-center justify-between p-3.5">
+                  <div className="flex flex-col gap-3.5 w-[48%]">
+                    <div className="flex items-center gap-2.5">
+                      <img src={match.team1Logo} className="w-5 h-5 rounded-full object-contain bg-white/10 p-0.5" onError={(e) => e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(match.team1)}&background=1e2024&color=fff`} />
+                      <span className="text-[13px] font-semibold text-white truncate">{match.team1}</span>
+                    </div>
+                    <div className="flex items-center gap-2.5">
+                      <img src={match.team2Logo} className="w-5 h-5 rounded-full object-contain bg-white/10 p-0.5" onError={(e) => e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(match.team2)}&background=1e2024&color=fff`} />
+                      <span className="text-[13px] font-semibold text-white truncate">{match.team2}</span>
+                    </div>
                   </div>
 
-                  {/* Center Logic (Timers/Status) */}
-                  <div className="flex flex-col items-center justify-center w-[40%] text-center">
-                    
-                    {isLive && (
-                       <>
-                         <div className="flex flex-col items-center justify-center gap-1 mb-2">
-                            <Circle className="w-2 h-2 text-[#ff4757] fill-[#ff4757] animate-pulse" />
-                            <span className="text-[11px] text-[#ff4757] font-medium">Live</span>
-                         </div>
-                         <span className="text-[13px] text-gray-300 font-medium">Watch Now</span>
-                       </>
+                  <div className="w-[20%] flex justify-center">
+                    {isLive ? (
+                       <div className="bg-[#ff4757]/10 border border-[#ff4757] rounded px-2.5 py-0.5 flex items-center gap-1.5 shadow-[0_0_10px_rgba(255,71,87,0.2)]">
+                          <Circle className="w-2 h-2 text-[#ff4757] fill-[#ff4757] animate-pulse" />
+                          <span className="text-[10px] font-black text-[#ff4757] uppercase tracking-wider">Live</span>
+                       </div>
+                    ) : (
+                       <div className="bg-gray-600/20 border border-gray-500 rounded px-2.5 py-0.5 flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{isRecent ? 'Ended' : 'Soon'}</span>
+                       </div>
                     )}
-
-                    {isRecent && (
-                       <>
-                         <span className="text-sm md:text-base font-bold text-white mb-1 tracking-wider">{formatTime(match.parsedTime) || match.time}</span>
-                         <span className="text-xs font-semibold text-[#00b865] mb-1">{formatDate(match.parsedTime) || "Recently"}</span>
-                         <span className="text-[11px] font-medium text-gray-400">Match Ended</span>
-                       </>
-                    )}
-
-                    {isUpcoming && (
-                       <>
-                         <span className="text-sm md:text-base font-bold text-white mb-1 tracking-wider">{formatTime(match.parsedTime) || match.time}</span>
-                         <span className="text-xs font-semibold text-[#00b865] mb-2">{formatDate(match.parsedTime) || "Upcoming"}</span>
-                         <span className="text-[11px] font-medium text-gray-400">{getCountdown(match.parsedTime)}</span>
-                       </>
-                    )}
-
                   </div>
 
-                  {/* Team 2 */}
-                  <div className="flex flex-col items-center gap-2 w-[30%]">
-                    <img src={match.team2Logo} className="w-12 h-12 md:w-14 md:h-14 object-contain" onError={(e) => e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(match.team2)}&background=1e2024&color=fff`} />
-                    <span className="text-[13px] md:text-sm font-semibold text-white text-center line-clamp-1">{match.team2}</span>
+                  <div className="w-[32%] text-right pr-2">
+                    {isLive ? (
+                        <span className="text-[13px] font-bold text-gray-300 tracking-wider font-mono">
+                            {formatTime(match.parsedTime) || "00:00:00"}
+                        </span>
+                    ) : isUpcoming ? (
+                        <div className="flex flex-col items-end gap-0.5">
+                            <span className="text-[11px] font-bold text-[#00b865]">{formatTime(match.parsedTime)}</span>
+                        </div>
+                    ) : (
+                        <span className="text-[11px] font-semibold text-gray-500">Completed</span>
+                    )}
                   </div>
 
                 </div>

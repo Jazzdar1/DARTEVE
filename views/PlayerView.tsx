@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Match, Channel } from '../types';
-import { ArrowLeft, AlertCircle, Settings, Sun, Volume2, Maximize, Minimize, Tv2, PlayCircle, Radio, Server, RefreshCw } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Settings, Sun, Volume2, Maximize, Minimize, Tv2, PlayCircle, Radio, Server, RefreshCw, ExternalLink, ShieldAlert, Clock } from 'lucide-react';
 import Hls from 'hls.js';
 
 interface PlayerViewProps {
@@ -10,7 +10,8 @@ interface PlayerViewProps {
   onSelectRelated: (channel: Channel) => void;
 }
 
-type EngineType = 'default' | 'clappr' | 'dplayer' | 'videojs';
+// 🔥 Naya Engine 'hls-advanced' yahan add ho gaya hai
+type EngineType = 'default' | 'hls-advanced' | 'clappr' | 'dplayer' | 'videojs';
 
 const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels, onSelectRelated }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -21,47 +22,59 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
   const fallbackTimerRef = useRef<any>(null); 
   const hasPlayedRef = useRef(false); 
 
-  // 🎛️ NEW PRO CONTROLS STATE
   const [volume, setVolume] = useState(1);
   const [brightness, setBrightness] = useState(1);
   const [qualityLevels, setQualityLevels] = useState<any[]>([]);
-  const [currentQuality, setCurrentQuality] = useState<number>(-1); // -1 = Auto
+  const [currentQuality, setCurrentQuality] = useState<number>(-1);
   const [indicator, setIndicator] = useState<{show: boolean, type: 'vol'|'bri', val: number}>({show: false, type: 'vol', val: 0});
   
-  // Touch Gestures Refs
   const touchStartY = useRef(0);
   const touchStartX = useRef(0);
   const isLeftHalf = useRef(false);
   const initialVal = useRef(0);
+  const isDragging = useRef(false);
   const indicatorTimer = useRef<any>(null);
 
   const [currentStream, setCurrentStream] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // 🔥 DEFAULT PLAYER ENGINE LOGIC
   const savedDefaultEngine = (localStorage.getItem('dartv_default_engine') as EngineType) || 'default';
   const [defaultEngine, setDefaultEngine] = useState<EngineType>(savedDefaultEngine);
   const [playerEngine, setPlayerEngine] = useState<EngineType>(savedDefaultEngine);
   
-  const [isSultanIframe, setIsSultanIframe] = useState(false);
   const [customIframeHtml, setCustomIframeHtml] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
 
+  const cleanStreamUrl = String(currentStream || '').split('|')[0].trim();
+  const isUpcomingMatch = cleanStreamUrl === 'upcoming' || cleanStreamUrl === '';
+  const matchId = String(match?.id || '');
+
+  const multiLinks = (match as any)?.multiLinks || [];
+  const currentLinkData = multiLinks.find((l:any) => l.url === currentStream);
+  
+  const isStrictIframe = 
+      matchId.includes('cat-sultan') || 
+      match?.type === 'Iframe' || 
+      currentLinkData?.type === 'Iframe' || 
+      currentLinkData?.isSultan ||
+      cleanStreamUrl.includes('.html') || 
+      cleanStreamUrl.includes('.php');
+
   useEffect(() => {
     if (match?.streamUrl) {
       setCurrentStream(match.streamUrl);
-      // 🔥 Load User's Default Engine every time a new stream starts
       const userDef = (localStorage.getItem('dartv_default_engine') as EngineType) || 'default';
       setPlayerEngine(userDef);
       setDefaultEngine(userDef);
       setError(null);
       setQualityLevels([]);
       setCurrentQuality(-1);
+      setLoading(!isUpcomingMatch);
     }
-  }, [match?.id, match?.streamUrl]);
+  }, [match?.id, match?.streamUrl, isUpcomingMatch]);
 
   const clearFallbackTimer = () => {
     if (fallbackTimerRef.current) {
@@ -72,14 +85,15 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
 
   const handleFallback = useCallback(() => {
     setPlayerEngine(prev => {
-      const engines: EngineType[] = ['default', 'clappr', 'dplayer', 'videojs'];
+      // 🔥 Fallback sequence updated
+      const engines: EngineType[] = ['default', 'hls-advanced', 'clappr', 'dplayer', 'videojs'];
       const idx = engines.indexOf(prev);
       if (idx < engines.length - 1) {
-        setError(`Slow Network! Switching to ${engines[idx + 1].toUpperCase()}...`);
+        setError(`Network Slow! Switching to ${engines[idx + 1].toUpperCase()}...`);
         setLoading(true);
         return engines[idx + 1];
       } else {
-        setError("All players failed. Stream link is dead or offline.");
+        setError("Origin Blocked! Connect System VPN (e.g. 1.1.1.1) or use External Player.");
         setLoading(false);
         return prev;
       }
@@ -87,22 +101,32 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
   }, []);
 
   const generatePlayerHtml = (engine: EngineType, url: string) => {
-    const errorSpy = `<script>function sendErr() { window.parent.postMessage({action: 'STREAM_ERROR'}, '*'); } window.onerror = sendErr;</script>`;
-    if (engine === 'clappr') return `<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/clappr@latest/dist/clappr.min.js"></script></head><body style="margin:0;background:#000;overflow:hidden;"><div id="player"></div>${errorSpy}<script>new Clappr.Player({source: "${url}", parentId: "#player", autoPlay: true, width: "100%", height: "100vh"});</script></body></html>`;
-    if (engine === 'dplayer') return `<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/hls.js/dist/hls.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/dplayer/1.27.1/DPlayer.min.js"></script></head><body style="margin:0;background:#000;overflow:hidden;"><div id="dplayer" style="width:100%;height:100vh;"></div>${errorSpy}<script>var dp = new DPlayer({container: document.getElementById('dplayer'), autoplay: true, video: {url: '${url}', type: 'hls'}}); dp.on('error', sendErr);</script></body></html>`;
-    if (engine === 'videojs') return `<!DOCTYPE html><html><head><link href="https://vjs.zencdn.net/8.3.0/video-js.css" rel="stylesheet" /><script src="https://vjs.zencdn.net/8.3.0/video.min.js"></script></head><body style="margin:0;background:#000;overflow:hidden;"><video id="my-video" class="video-js vjs-default-skin vjs-fill" controls autoplay preload="auto" style="width:100%;height:100vh;"><source src="${url}" type="application/x-mpegURL" /></video>${errorSpy}<script>videojs('my-video').on('error', sendErr);</script></body></html>`;
+    const errorSpy = `<script>function sendErr() { window.parent.postMessage({action: 'STREAM_ERROR'}, '*'); }</script>`;
+    
+    // 🔥 HLS ADVANCED (Pro Buffering & Auto-Recovery)
+    if (engine === 'hls-advanced') return `<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script><style>body{margin:0;background:#000;overflow:hidden;} video{width:100%;height:100vh;outline:none;}</style></head><body><video id="hls-video" controls autoplay playsinline></video>${errorSpy}<script>if(Hls.isSupported()){var video=document.getElementById('hls-video');var hls=new Hls({maxBufferLength:60,maxMaxBufferLength:600,liveSyncDurationCount:3,liveMaxLatencyDurationCount:10,enableWorker:true,lowLatencyMode:true,backBufferLength:90,fragLoadingTimeOut:20000,manifestLoadingTimeOut:20000});hls.loadSource('${url}');hls.attachMedia(video);hls.on(Hls.Events.ERROR,function(event,data){if(data.fatal){switch(data.type){case Hls.ErrorTypes.NETWORK_ERROR:console.log('HLS Network Error, recovering...');hls.startLoad();break;case Hls.ErrorTypes.MEDIA_ERROR:console.log('HLS Media Error, recovering...');hls.recoverMediaError();break;default:sendErr();break;}}});video.play().catch(e=>console.log('Play blocked',e));}else if(document.getElementById('hls-video').canPlayType('application/vnd.apple.mpegurl')){var v=document.getElementById('hls-video');v.src='${url}';v.play();}else{sendErr();}</script></body></html>`;
+    
+    if (engine === 'clappr') return `<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/clappr@latest/dist/clappr.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clappr-level-selector@latest/dist/level-selector.min.js"></script></head><body style="margin:0;background:#000;overflow:hidden;"><div id="player"></div>${errorSpy}<script>try { var player = new Clappr.Player({source: "${url}", parentId: "#player", autoPlay: true, width: "100%", height: "100vh", plugins: [LevelSelector], levelSelectorConfig: { title: 'Quality', labels: { 2: 'High', 1: 'Med', 0: 'Low' } }}); player.core.getCurrentContainer().on(Clappr.Events.CONTAINER_ERROR, sendErr); } catch(e){ sendErr(); }</script></body></html>`;
+    if (engine === 'videojs') return `<!DOCTYPE html><html><head><link href="https://vjs.zencdn.net/8.3.0/video-js.css" rel="stylesheet" /><script src="https://vjs.zencdn.net/8.3.0/video.min.js"></script><script src="https://cdn.jsdelivr.net/npm/videojs-contrib-quality-levels@2.1.0/dist/videojs-contrib-quality-levels.min.js"></script><script src="https://cdn.jsdelivr.net/npm/videojs-hls-quality-selector@1.1.4/dist/videojs-hls-quality-selector.min.js"></script></head><body style="margin:0;background:#000;overflow:hidden;"><video id="my-video" class="video-js vjs-default-skin vjs-fill vjs-big-play-centered" controls autoplay preload="auto" style="width:100%;height:100vh;"><source src="${url}" type="application/x-mpegURL" /></video>${errorSpy}<script>try { var player = videojs('my-video'); player.hlsQualitySelector({ displayCurrentQuality: true }); player.on('error', sendErr); } catch(e){ sendErr(); }</script></body></html>`;
+    if (engine === 'dplayer') return `<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/hls.js/dist/hls.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/dplayer/1.27.1/DPlayer.min.js"></script></head><body style="margin:0;background:#000;overflow:hidden;"><div id="dplayer" style="width:100%;height:100vh;"></div>${errorSpy}<script>try { var dp = new DPlayer({container: document.getElementById('dplayer'), autoplay: true, video: {url: '${url}', type: 'hls'}}); dp.on('error', sendErr); } catch(e){ sendErr(); }</script></body></html>`;
     return '';
   };
 
   useEffect(() => {
     let isMounted = true;
-    if (!currentStream) return;
+    if (!cleanStreamUrl || isUpcomingMatch) return; 
     
-    setLoading(true);
     hasPlayedRef.current = false;
     retryCount.current = 0;
     clearFallbackTimer();
-    
+
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+
+    if (isStrictIframe) {
+        setCustomIframeHtml(''); 
+        return () => { isMounted = false; clearFallbackTimer(); };
+    }
+
     fallbackTimerRef.current = setTimeout(() => {
         if (isMounted && !hasPlayedRef.current) handleFallback();
     }, 25000);
@@ -116,46 +140,39 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
         }
     };
 
-    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-
-    const isSultanStream = match?.id.includes('cat-sultan') || ((match as any)?.multiLinks || []).some((l:any) => l.url === currentStream && l.name.includes('(VIP)'));
-    const isIframeLink = currentStream.includes('.html') || currentStream.includes('.php') || ((match as any)?.multiLinks || []).find((l:any) => l.url === currentStream)?.type === 'Iframe';
-    
-    // 🔥 IFRAME LOGIC (100% UNTOUCHED)
-    if (isSultanStream || isIframeLink || match?.type === 'Iframe') {
-        clearFallbackTimer();
-        setIsSultanIframe(true); 
-        setCustomIframeHtml(''); 
+    if (playerEngine !== 'default') {
+        setCustomIframeHtml(generatePlayerHtml(playerEngine, cleanStreamUrl));
         return () => { isMounted = false; clearFallbackTimer(); };
     } else { 
-        setIsSultanIframe(false); 
+        setCustomIframeHtml(''); 
     }
-
-    if (playerEngine !== 'default') {
-        setCustomIframeHtml(generatePlayerHtml(playerEngine, currentStream));
-        return () => { isMounted = false; };
-    } else { setCustomIframeHtml(''); }
 
     const video = videoRef.current;
     if (!video) { clearFallbackTimer(); return; }
 
     video.addEventListener('playing', handleSuccess);
+    video.addEventListener('loadeddata', handleSuccess);
     video.volume = volume;
 
     if (Hls.isSupported()) {
       const hls = new Hls({ maxMaxBufferLength: 30, liveSyncDurationCount: 3 });
       hlsRef.current = hls;
-      hls.loadSource(currentStream);
+      
+      hls.loadSource(cleanStreamUrl); 
       hls.attachMedia(video);
       
       hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => { 
-          setQualityLevels(data.levels);
+          if (data.levels && data.levels.length > 0) setQualityLevels(data.levels);
           setCurrentQuality(-1);
-          video.play().catch(()=>console.log("Autoplay block")); 
+          video.play().catch(() => { if(isMounted) setLoading(false); }); 
       });
       
       hls.on(Hls.Events.ERROR, (e, data) => {
         if (data.fatal && isMounted) {
+          if (data.details === Hls.ErrorDetails.BUFFER_INCOMPATIBLE_CODECS_ERROR) {
+              setError("HEVC Format Blocked. Please click 'External Player'.");
+              setLoading(false); clearFallbackTimer(); return;
+          }
           if (hasPlayedRef.current) {
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
               else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
@@ -167,32 +184,37 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
         }
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = currentStream; 
-      video.play(); 
+      video.src = cleanStreamUrl; 
+      video.play().catch(() => { if(isMounted) setLoading(false); }); 
       video.addEventListener('error', () => { if (isMounted && !hasPlayedRef.current) { clearFallbackTimer(); handleFallback(); } });
     }
 
     return () => { 
         isMounted = false;
         clearFallbackTimer();
-        if (video) video.removeEventListener('playing', handleSuccess);
+        if (video) {
+           video.removeEventListener('playing', handleSuccess);
+           video.removeEventListener('loadeddata', handleSuccess);
+        }
         if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     };
-  }, [currentStream, playerEngine, match, handleFallback]);
+  }, [currentStream, cleanStreamUrl, playerEngine, match, handleFallback, isStrictIframe, isUpcomingMatch]);
 
-  // 🤏 GESTURE CONTROLS (Swipe Up/Down)
-  const handleTouchStart = (e: React.TouchEvent) => {
-     if (isSultanIframe || playerEngine !== 'default') return; // Iframe par touch detect nahi hota
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+     if (isStrictIframe || playerEngine !== 'default' || isUpcomingMatch) return; 
+     isDragging.current = true;
      touchStartY.current = e.touches[0].clientY;
      touchStartX.current = e.touches[0].clientX;
      isLeftHalf.current = touchStartX.current < window.innerWidth / 2;
      initialVal.current = isLeftHalf.current ? brightness : volume;
   };
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-     if (isSultanIframe || playerEngine !== 'default') return;
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+     if (!isDragging.current || isStrictIframe || playerEngine !== 'default' || isUpcomingMatch) return;
      const deltaY = touchStartY.current - e.touches[0].clientY;
-     const sensitivity = 0.004; // Speed of swipe
+     if (Math.abs(deltaY) < 5) return; 
+
+     const sensitivity = 0.005; 
      let newVal = initialVal.current + (deltaY * sensitivity);
      newVal = Math.max(0, Math.min(1, newVal));
 
@@ -203,6 +225,13 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
         setVolume(newVal);
         if (videoRef.current) videoRef.current.volume = newVal;
         showInd('vol', newVal);
+     }
+  };
+
+  const handleTouchEnd = () => {
+     isDragging.current = false;
+     if (videoRef.current && videoRef.current.paused && playerEngine === 'default' && !isStrictIframe && !isUpcomingMatch) {
+         videoRef.current.play().catch(e => console.log("Override play block", e));
      }
   };
 
@@ -225,142 +254,230 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
     if (!document.fullscreenElement) {
       await containerRef.current.requestFullscreen().catch(e => console.log(e));
       setIsFullscreen(true);
-    } else { document.exitFullscreen(); setIsFullscreen(false); }
+      try {
+        if (window.screen && window.screen.orientation && window.screen.orientation.lock) {
+          await window.screen.orientation.lock('landscape');
+        }
+      } catch (e) {}
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+      try {
+        if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
+          window.screen.orientation.unlock();
+        }
+      } catch (e) {}
+    }
   };
 
-  // 🔥 SET DEFAULT ENGINE FUNCTION
   const handleSetDefaultEngine = () => {
     localStorage.setItem('dartv_default_engine', playerEngine);
     setDefaultEngine(playerEngine);
     setShowSettings(false);
   };
 
+  const openInExternalPlayer = () => {
+    if (!cleanStreamUrl || isUpcomingMatch) return;
+    const isHttps = cleanStreamUrl.startsWith('https');
+    const urlWithoutScheme = cleanStreamUrl.replace(/^https?:\/\//, '');
+    const title = encodeURIComponent(match?.team1 || 'DarTV Stream');
+    const intentUrl = `intent://${urlWithoutScheme}#Intent;action=android.intent.action.VIEW;scheme=${isHttps ? 'https' : 'http'};type=video/*;S.title=${title};end`;
+    window.location.href = intentUrl;
+  };
+
   if (!match) return null;
-  const multiLinks = (match as any).multiLinks || [];
 
   return (
     <div className="flex flex-col h-screen bg-[#0f1115] overflow-hidden text-white">
-      <div ref={containerRef} key={match.id} className={`relative w-full bg-black flex flex-col justify-center select-none ${isFullscreen && !isSultanIframe ? 'h-screen fixed inset-0 z-50' : 'aspect-video'}`}>
+      <div ref={containerRef} key={match.id} className={`relative w-full bg-black flex flex-col justify-center select-none ${isFullscreen && !isStrictIframe ? 'h-screen fixed inset-0 z-50' : 'aspect-video'}`}>
         
-        {loading && <div className="absolute inset-0 flex items-center justify-center z-40 bg-black/60"><div className="w-10 h-10 border-4 border-[#00b865] border-t-transparent rounded-full animate-spin"></div></div>}
-        
-        {error && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-50 p-4 text-center">
-            {error.includes("Switching") ? <RefreshCw className="w-10 h-10 text-yellow-500 mb-4 animate-spin" /> : <AlertCircle className="w-10 h-10 text-red-500 mb-4" />}
-            <p className="text-gray-200 font-bold text-sm mb-4">{error}</p>
-            {!error.includes("Switching") && (
-               <button onClick={() => { setError(null); setLoading(true); setPlayerEngine('default'); }} className="px-6 py-2 bg-[#00b865] rounded-lg font-bold text-white shadow-lg">Retry Default</button>
-            )}
-          </div>
-        )}
-
-        {/* 🪄 BRIGHTNESS OVERLAY (Makes screen dark on left swipe) */}
-        {!isSultanIframe && playerEngine === 'default' && (
-           <div className="absolute inset-0 bg-black pointer-events-none z-20" style={{ opacity: 1 - brightness }}></div>
-        )}
-
-        {/* 📊 VOLUME/BRIGHTNESS INDICATOR */}
-        {indicator.show && (
-           <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/60 text-white px-6 py-4 rounded-xl flex flex-col items-center gap-2 z-50">
-               {indicator.type === 'vol' ? <Volume2 className="w-8 h-8 text-[#00b865]" /> : <Sun className="w-8 h-8 text-yellow-500" />}
-               <span className="font-bold text-lg">{Math.round(indicator.val * 100)}%</span>
-               {/* Progress Bar */}
-               <div className="w-24 h-1.5 bg-gray-600 rounded-full mt-1 overflow-hidden">
-                   <div className={`h-full ${indicator.type === 'vol' ? 'bg-[#00b865]' : 'bg-yellow-500'}`} style={{ width: `${indicator.val * 100}%` }}></div>
-               </div>
+        {isUpcomingMatch ? (
+           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f1115] z-50 p-6 text-center">
+             <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 pointer-events-auto">
+               <button onClick={onBack} className="p-2 bg-white/10 rounded-full hover:bg-[#00b865] transition"><ArrowLeft className="w-6 h-6 text-white" /></button>
+             </div>
+             <div className="w-20 h-20 bg-yellow-500/10 rounded-full flex items-center justify-center mb-6 border border-yellow-500/30 shadow-[0_0_30px_rgba(234,179,8,0.2)]">
+                 <Clock className="w-10 h-10 text-yellow-500 animate-pulse" />
+             </div>
+             <h2 className="text-2xl font-black text-white mb-3 tracking-wide">{match.team1}</h2>
+             <span className="bg-yellow-500/20 text-yellow-500 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest mb-6">Match is Upcoming</span>
+             <p className="text-gray-400 text-xs max-w-sm mb-8 leading-relaxed">The streaming link is not available yet. Please check back when the match goes live!</p>
+             <button onClick={onBack} className="px-8 py-3 bg-[#00b865] rounded-xl font-bold text-black shadow-[0_0_15px_rgba(0,184,101,0.3)] hover:scale-105 transition-transform">Browse Other Channels</button>
            </div>
-        )}
-
-        {isSultanIframe ? (
-          <>
-            <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-auto">
-              <button onClick={onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition"><ArrowLeft className="w-6 h-6 text-white" /></button>
-            </div>
-            <iframe 
-                src={currentStream.split('|')[0].trim()} 
-                className="w-full h-full border-none absolute inset-0 z-10 bg-black" 
-                allow="autoplay; fullscreen; encrypted-media; picture-in-picture" 
-                allowFullScreen 
-                referrerPolicy="no-referrer" 
-                sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups" 
-                onLoad={() => { setLoading(false); clearFallbackTimer(); if (error) setError(null); }} 
-            />
-          </>
-        ) : customIframeHtml !== '' ? (
-          <>
-             <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-auto">
-              <button onClick={onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition"><ArrowLeft className="w-6 h-6 text-white" /></button>
-              <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-black/50 rounded-full"><Settings className="w-6 h-6 text-white" /></button>
-            </div>
-            <iframe srcDoc={customIframeHtml} className="w-full h-full border-none absolute inset-0 z-10 bg-black" allow="autoplay; fullscreen" allowFullScreen onLoad={() => { setLoading(false); clearFallbackTimer(); if (error) setError(null); }} />
-          </>
         ) : (
           <>
-            <video ref={videoRef} className="w-full h-full object-contain z-10" playsInline />
+            {loading && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/80 backdrop-blur-sm pointer-events-none">
+                <div className="w-12 h-12 border-4 border-[#00b865] border-t-transparent rounded-full animate-spin mb-4 shadow-[0_0_15px_#00b865]"></div>
+                <p className="text-[#00b865] font-bold text-[10px] uppercase tracking-widest animate-pulse">Loading Stream...</p>
+              </div>
+            )}
             
-            {/* ✋ TOUCH GESTURE LAYER */}
-            <div 
-               className="absolute inset-0 z-30 cursor-pointer" 
-               onClick={() => setShowControls(!showControls)}
-               onTouchStart={handleTouchStart}
-               onTouchMove={handleTouchMove}
-            ></div>
+            {error && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-50 p-4 text-center">
+                {error.includes("Switching") ? <RefreshCw className="w-10 h-10 text-yellow-500 mb-4 animate-spin" /> : <ShieldAlert className="w-10 h-10 text-red-500 mb-4" />}
+                <p className="text-gray-200 font-bold text-sm mb-4 max-w-sm">{error}</p>
+                {!error.includes("Switching") && (
+                   <div className="flex gap-3">
+                       <button onClick={() => { setError(null); setLoading(true); setPlayerEngine('default'); }} className="px-6 py-2 bg-gray-700 rounded-lg font-bold text-white shadow-lg">Retry</button>
+                       <button onClick={openInExternalPlayer} className="px-6 py-2 bg-[#00b865] rounded-lg font-bold text-black shadow-lg flex items-center gap-2"><ExternalLink size={16}/> External Player</button>
+                   </div>
+                )}
+              </div>
+            )}
 
-            {/* CONTROLS */}
-            <div className={`absolute inset-0 flex flex-col justify-between bg-gradient-to-b from-black/80 via-transparent to-black/80 transition-opacity duration-300 z-40 pointer-events-none ${showControls ? 'opacity-100' : 'opacity-0'}`}>
-              <div className="flex items-center justify-between p-4 pointer-events-auto">
-                <button onClick={isFullscreen ? toggleFullscreen : onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition"><ArrowLeft className="w-6 h-6 text-white" /></button>
-                <h1 className="font-bold text-sm md:text-lg truncate px-4">{match.team1}</h1>
-                <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition"><Settings className="w-6 h-6 text-white" /></button>
-              </div>
-              <div className="flex items-center justify-between p-4 pointer-events-auto">
-                <span className="flex items-center gap-2 text-xs font-bold text-red-500 bg-red-500/20 px-2 py-1 rounded"><span className="w-2 h-2 bg-red-500 rounded-full animate-ping"></span> LIVE</span>
-                <button onClick={toggleFullscreen} className="p-2 hover:bg-white/20 rounded-full transition">{isFullscreen ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}</button>
-              </div>
+            {!isStrictIframe && playerEngine === 'default' && (
+               <div className="absolute inset-0 bg-black pointer-events-none z-20" style={{ opacity: 1 - brightness }}></div>
+            )}
+
+            {indicator.show && (
+               <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/60 text-white px-6 py-4 rounded-xl flex flex-col items-center gap-2 z-50">
+                   {indicator.type === 'vol' ? <Volume2 className="w-8 h-8 text-[#00b865]" /> : <Sun className="w-8 h-8 text-yellow-500" />}
+                   <span className="font-bold text-lg">{Math.round(indicator.val * 100)}%</span>
+                   <div className="w-24 h-1.5 bg-gray-600 rounded-full mt-1 overflow-hidden">
+                       <div className={`h-full ${indicator.type === 'vol' ? 'bg-[#00b865]' : 'bg-yellow-500'}`} style={{ width: `${indicator.val * 100}%` }}></div>
+                   </div>
+               </div>
+            )}
+
+            {isStrictIframe && (
+              <>
+                <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
+                  <button onClick={onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition pointer-events-auto"><ArrowLeft className="w-6 h-6 text-white" /></button>
+                </div>
+                <iframe 
+                    key={`iframe-${cleanStreamUrl}`}
+                    src={cleanStreamUrl} 
+                    className="w-full h-full border-none absolute inset-0 z-10 bg-black" 
+                    allow="autoplay; fullscreen; encrypted-media; picture-in-picture; display-capture; web-share" 
+                    allowFullScreen 
+                    onLoad={() => setLoading(false)}
+                />
+              </>
+            )}
+
+            {!isStrictIframe && customIframeHtml !== '' && (
+              <>
+                 <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
+                  <button onClick={onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition pointer-events-auto"><ArrowLeft className="w-6 h-6 text-white" /></button>
+                  <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition pointer-events-auto"><Settings className="w-6 h-6 text-white" /></button>
+                </div>
+                <iframe 
+                   key={`custom-${cleanStreamUrl}-${playerEngine}`} 
+                   srcDoc={customIframeHtml} 
+                   className="w-full h-full border-none absolute inset-0 z-10 bg-black" 
+                   allow="autoplay; fullscreen" 
+                   allowFullScreen 
+                   onLoad={() => { setLoading(false); clearFallbackTimer(); }} 
+                />
+              </>
+            )}
+
+            <div className={`absolute inset-0 w-full h-full z-10 ${(isStrictIframe || customIframeHtml !== '') ? 'hidden' : 'block'}`}>
+                <video 
+                   ref={videoRef} 
+                   className="w-full h-full object-contain bg-black" 
+                   playsInline 
+                   autoPlay 
+                />
+                
+                <div 
+                   className="absolute inset-0 z-30 cursor-pointer" 
+                   style={{ touchAction: 'none' }} 
+                   onClick={(e) => {
+                      if (Math.abs(touchStartY.current - e.touches[0].clientY) < 10) setShowControls(!showControls);
+                   }}
+                   onTouchStart={handleTouchStart}
+                   onTouchMove={handleTouchMove}
+                   onTouchEnd={handleTouchEnd}
+                ></div>
+
+                <div className={`absolute inset-0 flex flex-col justify-between bg-gradient-to-b from-black/80 via-transparent to-black/80 transition-opacity duration-300 z-40 pointer-events-none ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+                  <div className="flex items-center justify-between p-4 pointer-events-auto">
+                    <button onClick={isFullscreen ? toggleFullscreen : onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition"><ArrowLeft className="w-6 h-6 text-white" /></button>
+                    <h1 className="font-bold text-sm md:text-lg truncate px-4">{match.team1}</h1>
+                    <div className="flex gap-2">
+                       <button onClick={openInExternalPlayer} className="p-2 bg-[#00b865]/20 border border-[#00b865]/50 rounded-full hover:bg-[#00b865] transition" title="Play in MX Player / VLC"><ExternalLink className="w-5 h-5 text-white" /></button>
+                       <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition"><Settings className="w-6 h-6 text-white" /></button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between p-4 pointer-events-auto">
+                    <span className="flex items-center gap-2 text-xs font-bold text-red-500 bg-red-500/20 px-2 py-1 rounded"><span className="w-2 h-2 bg-red-500 rounded-full animate-ping"></span> LIVE</span>
+                    <button onClick={toggleFullscreen} className="p-2 hover:bg-white/20 rounded-full transition">{isFullscreen ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}</button>
+                  </div>
+                </div>
             </div>
           </>
         )}
 
-        {/* ⚙️ PRO SETTINGS PANEL (Engine + Quality) */}
-        {showSettings && (
-          <div className="absolute right-0 top-0 bottom-0 w-64 bg-black/95 border-l border-white/10 z-50 p-4 flex flex-col overflow-y-auto animate-in slide-in-from-right pointer-events-auto shadow-2xl">
+        {showSettings && !isUpcomingMatch && !isStrictIframe && (
+          <div className="absolute right-0 top-0 bottom-0 w-72 bg-black/95 border-l border-white/10 z-[100] p-4 flex flex-col overflow-y-auto animate-in slide-in-from-right pointer-events-auto shadow-2xl">
             <div className="flex justify-between items-center mb-6 pb-2 border-b border-white/10">
                 <h3 className="font-black text-sm uppercase tracking-widest text-[#00b865]">Player Settings</h3>
-                <button onClick={() => setShowSettings(false)} className="text-gray-400 hover:text-white font-bold text-xl">×</button>
+                <button onClick={() => setShowSettings(false)} className="text-gray-400 hover:text-white font-bold text-xl p-1">×</button>
+            </div>
+
+            <div className="mb-6 pb-6 border-b border-white/10 text-center">
+                <div className="flex justify-center items-center mb-3">
+                    <ShieldAlert size={28} className="text-[#00b865] opacity-80"/>
+                </div>
+                <h4 className="text-xs font-black text-white uppercase tracking-wider mb-2">Network Assistant</h4>
+                <p className="text-[10px] text-gray-400 leading-relaxed">
+                   If a channel provides Audio only, it may be a HEVC format stream. 
+                   <br/><br/>
+                   Please click the <b>External Player (↗)</b> button in the top bar to play it in full HD using VLC or MX Player.
+                </p>
             </div>
             
-            {/* 📺 Quality Selector */}
-            {qualityLevels.length > 0 && playerEngine === 'default' && (
+            {playerEngine === 'default' && (
                 <div className="mb-6">
                     <p className="text-xs text-gray-500 font-bold mb-2 uppercase">Video Quality</p>
                     <div className="flex flex-col gap-1.5">
-                        <button onClick={() => changeQuality(-1)} className={`text-left px-3 py-2 rounded text-xs font-bold transition ${currentQuality === -1 ? 'bg-[#00b865] text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'}`}>
-                            Auto
-                        </button>
-                        {qualityLevels.map((level, index) => (
-                            <button key={index} onClick={() => changeQuality(index)} className={`text-left px-3 py-2 rounded text-xs font-bold transition flex justify-between ${currentQuality === index ? 'bg-[#00b865] text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'}`}>
-                                <span>{level.height ? `${level.height}p` : `Level ${index + 1}`}</span>
-                                {level.bitrate && <span className="text-[10px] opacity-60">{Math.round(level.bitrate / 1000)} kbps</span>}
-                            </button>
-                        ))}
+                        {qualityLevels.length > 0 ? (
+                            <>
+                                <button onClick={() => changeQuality(-1)} className={`text-left px-3 py-2 rounded text-xs font-bold transition ${currentQuality === -1 ? 'bg-[#00b865] text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'}`}>Auto</button>
+                                {qualityLevels.map((level, index) => (
+                                    <button key={index} onClick={() => changeQuality(index)} className={`text-left px-3 py-2 rounded text-xs font-bold transition flex justify-between items-center ${currentQuality === index ? 'bg-[#00b865] text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'}`}>
+                                        <span className="flex items-center">
+                                            {level.height ? `${level.height}p` : `Stream ${index + 1}`}
+                                            {level.height >= 720 && <span className="bg-blue-600 text-white text-[8px] px-1.5 py-0.5 rounded font-black ml-2 uppercase tracking-wider">HD</span>}
+                                        </span>
+                                        {level.bitrate ? <span className="text-[10px] opacity-60">{Math.round(level.bitrate / 1000)} kbps</span> : null}
+                                    </button>
+                                ))}
+                            </>
+                        ) : (
+                            <button className="text-left px-3 py-2 rounded text-xs font-bold bg-[#00b865] text-white cursor-default">Native Player (Auto)</button>
+                        )}
                     </div>
                 </div>
             )}
 
-            {/* 🛠️ Engine Selector with Set Default Option */}
             <div>
                 <div className="flex justify-between items-center mb-2">
-                    <p className="text-xs text-gray-500 font-bold uppercase">Player Engine</p>
+                    <p className="text-xs text-gray-500 font-bold uppercase">Change Player</p>
                     <span className="text-[9px] bg-white/10 px-2 py-0.5 rounded text-gray-400">Default: {defaultEngine.toUpperCase()}</span>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                
+                {/* 🔥 HLS Advanced Button added to Grid */}
+                <div className="grid grid-cols-2 gap-2 mb-2">
                   <button onClick={() => setPlayerEngine('default')} className={`px-2 py-2 rounded text-[10px] font-bold ${playerEngine === 'default' ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>Native</button>
-                  <button onClick={() => setPlayerEngine('clappr')} className={`px-2 py-2 rounded text-[10px] font-bold ${playerEngine === 'clappr' ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>Clappr</button>
+                  <button onClick={() => setPlayerEngine('hls-advanced')} className={`px-2 py-2 rounded text-[10px] font-bold flex flex-col items-center gap-1 ${playerEngine === 'hls-advanced' ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>
+                      <span>HLS Advanced</span>
+                      <span className="text-[7px] bg-black/30 px-1 rounded uppercase text-yellow-500">Anti-Buffer</span>
+                  </button>
+                  <button onClick={() => setPlayerEngine('clappr')} className={`px-2 py-2 rounded text-[10px] font-bold flex flex-col items-center gap-1 ${playerEngine === 'clappr' ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>
+                      <span>Clappr</span>
+                      <span className="text-[7px] bg-black/30 px-1 rounded uppercase">w/ Quality UI</span>
+                  </button>
                   <button onClick={() => setPlayerEngine('dplayer')} className={`px-2 py-2 rounded text-[10px] font-bold ${playerEngine === 'dplayer' ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>DPlayer</button>
-                  <button onClick={() => setPlayerEngine('videojs')} className={`px-2 py-2 rounded text-[10px] font-bold ${playerEngine === 'videojs' ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>VideoJS</button>
                 </div>
                 
-                {/* SET AS DEFAULT BUTTON */}
+                <button onClick={() => setPlayerEngine('videojs')} className={`w-full px-2 py-2 rounded text-[10px] font-bold flex items-center justify-center gap-2 ${playerEngine === 'videojs' ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>
+                    <span>VideoJS Player</span>
+                    <span className="text-[7px] bg-black/30 px-1.5 py-0.5 rounded uppercase">w/ Quality UI</span>
+                </button>
+                
                 {playerEngine !== defaultEngine && (
                   <button 
                       onClick={handleSetDefaultEngine}
@@ -377,8 +494,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
       {!isFullscreen && (
         <div className="flex-1 overflow-y-auto bg-[#0f1115] pb-24">
           
-          {/* SULTAN VIP AND OTHER SERVERS LIST */}
-          {multiLinks.length > 0 && (
+          {multiLinks.length > 0 && !isUpcomingMatch && (
             <div className="p-4 border-b border-white/5 bg-[#1a1d24]">
               <h2 className="text-[10px] font-black text-yellow-500 uppercase tracking-widest mb-3 flex items-center gap-2"><Server size={14} /> Available Streams ({multiLinks.length})</h2>
               <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-2">

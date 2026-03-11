@@ -7,6 +7,7 @@ import LinkModal from './components/LinkModal';
 import FloatingPlayer from './components/FloatingPlayer';
 import { WifiOff, RefreshCw, Loader2, Activity } from 'lucide-react';
 
+const MoviesView = lazy(() => import('./views/MoviesView'));
 const LiveEventsView = lazy(() => import('./views/LiveEvents'));
 const CategoriesView = lazy(() => import('./views/CategoriesView'));
 const ChannelListView = lazy(() => import('./views/ChannelList'));
@@ -15,8 +16,14 @@ const AboutView = lazy(() => import('./views/AboutView'));
 const PrivacyPolicyView = lazy(() => import('./views/PrivacyPolicyView'));
 const RadioView = lazy(() => import('./views/RadioView'));
 
+// Bypass Strict Typing locally for smooth navigation
+type AppScreen = View | 'radio' | 'movies' | 'channel-detail' | 'player' | 'about' | 'privacy';
+
 const BASE_GITHUB = 'https://raw.githubusercontent.com/FunctionError/PiratesTv/main';
 const DEFAULT_M3U = `${BASE_GITHUB}/combined_playlist.m3u`;
+
+const LIVE_EVENTS_JSON_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/main/dartv_live_matches.json';
+const MOVIES_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/main/dartv_movies.json';
 
 const API_BASE = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/main';
 const CRICKET_URL = `${API_BASE}/cricket_channels.json`;
@@ -24,10 +31,19 @@ const VIP_URL = `${API_BASE}/vip_cricket.json`;
 const SULTAN_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/refs/heads/main/sultan_cricket.json';
 const VAST_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/refs/heads/main/dartv_vast_channels.json';
 const GROUP_B_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-B/main/live_matches_B.json';
+const FANCODE_URL = 'https://raw.githubusercontent.com/dartv-ajaz/Fancode-Live-API/main/live_matches.json';
+
+const TSPORTS_JSON_URL = 'https://raw.githubusercontent.com/abusaeeidx/T-Sports-Playlist-Auto-Update/refs/heads/main/channels_data.json';
+const TSPORTS_COMBINE_URL = 'https://raw.githubusercontent.com/abusaeeidx/T-Sports-Playlist-Auto-Update/refs/heads/main/combine_playlist.m3u';
+const LX_URL = 'https://raw.githubusercontent.com/raid35/channel-links/main/LX.m3u';
+const BEIN_URL = 'https://is.gd/xdFAu6.m3u'; 
+
+// 🔥 NAYI INDIAN PLAYLIST YAHAN ADD HUI HAI
+const INDIAN_URL = 'https://raw.githubusercontent.com/praneshpaulose/Kerala/af18ac3b046b0121c5429c898a2db197ceaeee0a/FMall.m3u';
 
 const App: React.FC = () => {
-  const [activeView, setActiveView] = useState<View | 'radio'>('live-events');
-  const [lastMainView, setLastMainView] = useState<View | 'radio'>('live-events');
+  const [activeView, setActiveView] = useState<AppScreen>('live-events');
+  const [lastMainView, setLastMainView] = useState<AppScreen>('live-events');
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   
   const [matches, setMatches] = useState<Match[]>([]);
@@ -35,6 +51,7 @@ const App: React.FC = () => {
   const [categoryChannels, setCategoryChannels] = useState<Channel[]>([]);
   const [playlistCache, setPlaylistCache] = useState<Record<string, Channel[]>>({});
   
+  const [vodMovies, setVodMovies] = useState<any[]>([]);
   const [favorites, setFavorites] = useState<Channel[]>([]);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   
@@ -50,11 +67,12 @@ const App: React.FC = () => {
   const [isCategoryLoading, setIsCategoryLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // 📱 MOBILE HARDWARE BACK BUTTON LOGIC
+  const [globalMultiLinks, setGlobalMultiLinks] = useState<any[]>([]);
+
   useEffect(() => {
     window.history.pushState(null, '', window.location.href);
     const handleBackButton = () => {
-      if (activeView === 'player' || activeView === 'channel-detail' || activeView === 'radio') {
+      if (activeView === 'player' || activeView === 'channel-detail' || activeView === 'radio' || activeView === 'movies') {
         setActiveView(lastMainView);
         window.history.pushState(null, '', window.location.href);
       } else if (isSidebarOpen) {
@@ -67,24 +85,18 @@ const App: React.FC = () => {
   }, [activeView, lastMainView, isSidebarOpen]);
 
   useEffect(() => {
-    const savedFavs = localStorage.getItem('cricpk_favorites');
+    const savedFavs = localStorage.getItem('dartv_favorites');
     if (savedFavs) try { setFavorites(JSON.parse(savedFavs)); } catch (e) {}
     
-    const savedCustom = localStorage.getItem('cricpk_custom_playlists');
+    const savedCustom = localStorage.getItem('dartv_custom_playlists');
     if (savedCustom) try { setCustomCategories(JSON.parse(savedCustom)); } catch (e) {}
   }, []);
 
-  // 🚀 CUSTOM PLAYLIST MANAGER (ADD & DELETE)
   const handleAddCustomPlaylist = (name: string, url: string) => {
-    const newCategory: Category = {
-      id: `cat-custom-${Date.now()}`,
-      name: name,
-      playlistUrl: url
-    };
-    
+    const newCategory: Category = { id: `cat-custom-${Date.now()}`, name: name, playlistUrl: url };
     setCustomCategories(prev => {
       const updated = [...prev, newCategory];
-      localStorage.setItem('cricpk_custom_playlists', JSON.stringify(updated));
+      localStorage.setItem('dartv_custom_playlists', JSON.stringify(updated));
       return updated;
     });
   };
@@ -92,23 +104,13 @@ const App: React.FC = () => {
   const handleDeleteCustomPlaylist = (id: string) => {
     setCustomCategories(prev => {
       const updated = prev.filter(cat => cat.id !== id);
-      localStorage.setItem('cricpk_custom_playlists', JSON.stringify(updated));
+      localStorage.setItem('dartv_custom_playlists', JSON.stringify(updated));
       return updated;
     });
-    // Agar cache mein uski list padi hai toh wo bhi clear kardo
     setPlaylistCache(prev => {
       const newCache = { ...prev };
       delete newCache[id];
       return newCache;
-    });
-  };
-
-  const toggleFavorite = (channel: Channel) => {
-    setFavorites(prev => {
-      const isFav = prev.some(c => c.id === channel.id);
-      const newFavs = isFav ? prev.filter(c => c.id !== channel.id) : [...prev, channel];
-      localStorage.setItem('cricpk_favorites', JSON.stringify(newFavs));
-      return newFavs;
     });
   };
 
@@ -130,16 +132,34 @@ const App: React.FC = () => {
     setFetchError(null);
 
     try {
+      try {
+        const moviesRes = await fetch(`${MOVIES_URL}?t=${Date.now()}`);
+        if (moviesRes.ok) {
+           const moviesData = await moviesRes.json();
+           setVodMovies(moviesData);
+        }
+      } catch (e) { console.log("Could not load movies"); }
+
       let currentChannels: Channel[] = [];
       let newCache: Record<string, Channel[]> = {};
       let newCloudCats: Category[] = [];
 
       newCloudCats.push({ id: 'cat-combined', name: '📺 All Live TV (Pirates)', playlistUrl: DEFAULT_M3U });
 
-      let apiConfigs: any[] = [
+      // 🔥 SAARI PLAYLISTS (Nayi Indian playlist list mein shamil hai)
+      const apiConfigs: any[] = [
         { id: 'cat-sultan', name: '👑 Sultan VIP', url: SULTAN_URL, type: 'json', key: 'channels' },
         { id: 'cat-group-b', name: 'Hotstar LIVE', url: GROUP_B_URL, type: 'json', key: 'matches' },
+        { id: 'cat-fancode', name: '🏏 Fancode Live (Full)', url: FANCODE_URL, type: 'json', key: 'matches' },
         { id: 'cat-vip', name: '⚡ VIP Cricket', url: VIP_URL, type: 'json', key: 'channels' },
+        { id: 'cat-lx', name: '🔥 LX Premium', url: LX_URL, type: 'm3u', key: 'channels' }, 
+        { id: 'cat-bein', name: '⚽ Bein Sports', url: BEIN_URL, type: 'm3u', key: 'channels' }, 
+        
+        // 👇 INDIAN KHAZANA
+        { id: 'cat-indian', name: '🇮🇳 Indian', url: INDIAN_URL, type: 'm3u', key: 'channels' }, 
+        
+        { id: 'cat-tsports-json', name: '🏆 T-Sports Data', url: TSPORTS_JSON_URL, type: 'json', key: 'channels' },
+        { id: 'cat-tsports-comb', name: '🏆 T-Sports Combine', url: TSPORTS_COMBINE_URL, type: 'm3u', key: 'channels' },
         { id: 'cat-cricket', name: 'Cricket TV', url: CRICKET_URL, type: 'json', key: 'channels' },
         { id: 'cat-vast', name: '📺 Vast Channels', url: VAST_URL, type: 'json', key: 'channels' }
       ];
@@ -147,22 +167,13 @@ const App: React.FC = () => {
       try {
           const adminUrl = `https://raw.githubusercontent.com/dartv-ajaz/Live-Sports-Group-A/main/admin_playlists.json?t=${Date.now()}`;
           const adminRes = await fetch(adminUrl);
-          
           if (adminRes.ok) {
               const externalPlaylists = await adminRes.json();
               externalPlaylists.forEach((list: any, idx: number) => {
-                  apiConfigs.push({
-                      id: `cat-admin-${idx}`,
-                      name: list.name,
-                      url: list.url,
-                      type: 'auto',
-                      key: 'channels'
-                  });
+                  apiConfigs.push({ id: `cat-admin-${idx}`, name: list.name, url: list.url, type: 'auto', key: 'channels' });
               });
           }
-      } catch (err) {
-          console.log("Admin playlists file not found yet.");
-      }
+      } catch (err) {}
 
       apiConfigs.forEach(c => newCloudCats.push({ id: c.id, name: c.name, playlistUrl: c.url }));
       newCloudCats.push({ id: 'cat-global-radio', name: '📻 Global FM Radio', playlistUrl: '' });
@@ -205,172 +216,198 @@ const App: React.FC = () => {
 
       apiResults.forEach(({ config, data: apiData }) => {
         if (!apiData) return;
-        const items = Array.isArray(apiData) ? apiData : (apiData[config.key] || apiData.matches || apiData.channels || []);
-        
+        let items: any[] = [];
+        if (Array.isArray(apiData)) items = apiData;
+        else if (apiData.data && Array.isArray(apiData.data)) items = apiData.data;
+        else if (apiData[config.key] && Array.isArray(apiData[config.key])) items = apiData[config.key];
+        else if (apiData.matches && Array.isArray(apiData.matches)) items = apiData.matches;
+        else if (apiData.channels && Array.isArray(apiData.channels)) items = apiData.channels;
+
         if (items.length > 0) {
             const apiChannels: Channel[] = items.map((m: any, idx: number) => {
-                const isUpcoming = String(m.status).toUpperCase() === 'UPCOMING';
+                const statusRaw = String(m.status || m.match_status || '').toUpperCase();
+                const isUpcoming = statusRaw.includes('UPCOMING') || statusRaw.includes('SCHEDULE');
+                const isLive = statusRaw.includes('LIVE');
+                let prefix = isUpcoming ? '⏳ (Upcoming) ' : isLive ? '🔴 ' : '';
+                const matchName = String(m.title || m.name || m.match_name || m.event_name || `Match ${idx}`);
+                const streamUrl = String(m.adfree_url || m.dai_url || m.url || m.streamUrl || m.stream_url || m.play_url || m.link || '');
+
                 return {
                     id: `ch-${config.id}-${m.match_id || m.id || idx}`,
-                    name: String(isUpcoming ? `⏳ (Upcoming) ${m.title || m.name}` : (m.title || m.name || m.match_name || `Channel ${idx}`)),
-                    logo: String(m.src || m.logo || m.banner || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.title || m.name || config.name || 'TV')}`),
+                    name: prefix + matchName,
+                    logo: String(m.src || m.logo || m.banner || m.team_1_flag || `https://ui-avatars.com/api/?name=${encodeURIComponent(matchName)}&background=00b865&color=fff`),
                     categoryId: config.id,
-                    streamUrl: String(m.adfree_url || m.dai_url || m.url || m.streamUrl || '')
+                    streamUrl: streamUrl || 'upcoming'
                 };
-            }).filter(c => c.streamUrl !== '');
-
+            });
             newCache[config.id] = apiChannels;
             currentChannels = [...currentChannels, ...apiChannels];
-
-            if (config.key === 'matches') {
-               rawMatches = [...rawMatches, ...items.map((m:any) => ({...m, configName: config.name}))];
-            }
+            if (config.key === 'matches') rawMatches = [...rawMatches, ...items.map((m:any) => ({...m, configName: config.name}))];
         }
       });
 
       const allSportsLinks: any[] = [];
-      const sportsKeywords = ['sports', 'ptv', 'willow', 'ten', 'astro', 'sony', 'a sports', 'geo super', 'espn', 'fox', 'supersport', 'bein'];
+      const sportsKeywords = ['sports', 'ptv', 'willow', 'ten', 'astro', 'sony', 'a sports', 'geo super', 'espn', 'fox', 'supersport', 'bein', 'tsports', 't-sports'];
       const blockKeywords = ['movie', 'max', 'gold', 'cinema', 'action', 'entertainment', 'jalsha', 'pravah', 'colors', 'star plus', 'zee tv']; 
       
       currentChannels.forEach(ch => {
           const nameLow = String(ch.name || '').toLowerCase();
           if (blockKeywords.some(badWord => nameLow.includes(badWord))) return;
 
-          if (sportsKeywords.some(kw => nameLow.includes(kw))) {
+          if (sportsKeywords.some(kw => nameLow.includes(kw)) && ch.streamUrl !== 'upcoming') {
              const isM3u8 = String(ch.streamUrl || '').includes('.m3u8');
              const isSultan = ch.categoryId === 'cat-sultan';
-             
              if (!allSportsLinks.find(p => p.url === ch.streamUrl)) {
                  let catName = isSultan ? 'Sultan VIP' : ch.categoryId.replace('cat-', '').toUpperCase();
-                 allSportsLinks.push({ 
-                     name: isSultan ? `⭐ ${ch.name} (VIP)` : `${ch.name} (${catName})`, 
-                     url: ch.streamUrl, 
-                     type: isSultan ? 'Iframe' : (isM3u8 ? 'Video' : 'Iframe'),
-                     isSultan: isSultan
-                 });
+                 allSportsLinks.push({ name: isSultan ? `⭐ ${ch.name} (VIP)` : `${ch.name} (${catName})`, url: ch.streamUrl, type: isSultan ? 'Iframe' : (isM3u8 ? 'Video' : 'Iframe'), isSultan: isSultan });
              }
           }
       });
-
-      allSportsLinks.sort((a, b) => {
-          if (a.isSultan && !b.isSultan) return -1;
-          if (!a.isSultan && b.isSultan) return 1;
-          return 0;
-      });
+      allSportsLinks.sort((a, b) => { if (a.isSultan && !b.isSultan) return -1; if (!a.isSultan && b.isSultan) return 1; return 0; });
+      
+      setGlobalMultiLinks(allSportsLinks);
 
       const now = Date.now();
       const genericMatches = rawMatches.map((m: any, idx: number) => {
-          let status = 'Live';
-          let parsedTime = 0;
-          let isHot = true;
-
-          const timeNum = Number(m.startTime || m.time);
-          if (!isNaN(timeNum) && timeNum > 0) {
-              parsedTime = timeNum < 10000000000 ? timeNum * 1000 : timeNum;
-              const diffHours = (now - parsedTime) / (1000 * 60 * 60);
-              
-              if (diffHours < -0.1) { status = 'Upcoming'; isHot = false; } 
-              else if (diffHours >= -0.1 && diffHours <= 8) { status = 'Live'; isHot = true; } 
-              else { status = 'Completed'; isHot = false; }
-          } else {
-              const upStatus = String(m.status || '').toUpperCase();
-              if (upStatus.includes('UPCOMING')) { status = 'Upcoming'; isHot = false; }
-              else if (upStatus.includes('END') || upStatus.includes('COMPLET') || upStatus.includes('RECENT')) { status = 'Completed'; isHot = false; }
-              else { status = 'Live'; isHot = true; }
-          }
+          const statusRaw = String(m.status || m.match_status || '').toUpperCase();
+          let status = 'Live'; let isHot = true;
+          if (statusRaw.includes('UPCOMING') || statusRaw.includes('SCHEDULE')) { status = 'Upcoming'; isHot = false; } 
+          else if (statusRaw.includes('END') || statusRaw.includes('COMPLET')) { status = 'Completed'; isHot = false; }
+          const team1Name = String(m.team_1 || m.team_1_name || m.team1 || m.title || m.name || 'Team 1');
+          const finalStreamUrl = m.adfree_url || m.dai_url || m.url || m.streamUrl || m.stream_url || 'upcoming';
 
           return {
-              id: m.match_id || m.id || `live-gen-${idx}`,
-              sport: m.event_category || m.sport || m.category || 'Sports',
-              league: m.event_name || m.configName || 'Live Event',
-              team1: String(m.team_1 || m.title || m.name || 'Team 1'),
-              team2: String(m.team_2 || 'LIVE'),
-              team1Logo: String(m.src || m.logo || m.team_1_flag || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.team_1 || m.title || m.name || 'T1')}`),
-              team2Logo: String(m.src || m.logo || m.team_2_flag || `https://ui-avatars.com/api/?name=VS`),
-              status: status,
-              time: parsedTime > 0 ? String(parsedTime) : 'Live Now',
-              isHot: isHot,
-              streamUrl: m.adfree_url || m.dai_url || m.url || m.streamUrl,
-              multiLinks: allSportsLinks 
+              id: m.match_id || m.id || `live-gen-${idx}`, sport: m.event_category || m.sport || m.category || 'Sports', league: m.event_name || m.series_name || m.configName || 'Live Event', team1: team1Name, team2: String(m.team_2 || 'TBA'),
+              team1Logo: String(m.src || m.logo || m.team_1_flag || `https://ui-avatars.com/api/?name=${encodeURIComponent(team1Name)}`), team2Logo: String(m.team_2_flag || m.team2_logo || `https://ui-avatars.com/api/?name=VS`),
+              status: status, time: m.startTime || m.start_time || m.time || 'Live Now', isHot: isHot, streamUrl: finalStreamUrl, multiLinks: allSportsLinks 
           };
       });
 
-      setMatches([...genericMatches]);
+      let finalMatches = [...genericMatches];
+
+      try {
+          const evRes = await fetch(`${LIVE_EVENTS_JSON_URL}?t=${Date.now()}`);
+          if (evRes.ok) {
+              const pyEventsData = await evRes.json();
+              const pyMatches = pyEventsData.map((e: any, idx: number) => ({
+                  id: e.id || `match-py-${idx}`, sport: e.sport || 'Sports', league: e.league || 'Live Event', team1: e.team1 || 'Team A', team2: e.team2 || 'Team B',
+                  team1Logo: e.team1Logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(e.team1 || 'T1')}&background=1e2024&color=fff`,
+                  team2Logo: e.team2Logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(e.team2 || 'T2')}&background=1e2024&color=fff`,
+                  status: e.status || 'Live', time: e.time || 'Live Now', isHot: e.isHot !== undefined ? e.isHot : true, type: e.type || 'Video',
+                  streamUrl: e.streamUrl || 'upcoming', multiLinks: (e.multiLinks && e.multiLinks.length > 0) ? e.multiLinks : allSportsLinks 
+              }));
+              finalMatches = [...pyMatches, ...finalMatches];
+          }
+      } catch(e) {}
+
+      const liveCount = finalMatches.filter(m => m.status === 'Live').length;
+      if (liveCount === 0 && currentChannels.length > 0) {
+          const fallbackChannels = currentChannels.filter(c => c.categoryId === 'cat-sultan' || c.categoryId === 'cat-vip').slice(0, 12);
+          const fallbackMatches = fallbackChannels.map((ch, idx) => ({
+              id: `fallback-match-${idx}`, sport: 'Sports TV', league: '24/7 Live Stream', team1: ch.name, team2: 'LIVE', team1Logo: ch.logo, team2Logo: 'https://ui-avatars.com/api/?name=TV&background=00b865&color=fff',
+              status: 'Live', time: 'Live Now', isHot: true, type: ch.categoryId === 'cat-sultan' ? 'Iframe' : 'Video', streamUrl: ch.streamUrl, multiLinks: allSportsLinks
+          }));
+          finalMatches = [...finalMatches, ...fallbackMatches];
+      }
+
+      setMatches(finalMatches);
       setAllChannels(currentChannels);
       setPlaylistCache(newCache);
       setIsLoading(false);
-
     } catch (error: any) {
-      console.error("Data fetch failed", error);
+      console.error(error);
       setIsLoading(false);
-      if (matches.length === 0) setFetchError("Please check your internet connection.");
+      setFetchError("Please check your internet connection.");
     }
   }, []); 
 
   useEffect(() => { fetchInitialData(); }, [fetchInitialData]);
 
   const handleCategorySelect = async (category: Category) => {
-    if (category.id === 'cat-global-radio') {
-      setActiveView('radio' as View);
-      return;
-    }
-
+    if (category.id === 'cat-global-radio') { handleNavChange('radio'); return; }
     setSelectedCategory(category);
-    setActiveView('channel-detail');
+    handleNavChange('channel-detail');
     
     if (category.id === 'cat-favorites') { setCategoryChannels(favorites); return; }
     if (playlistCache[category.id] && playlistCache[category.id].length > 0) { setCategoryChannels(playlistCache[category.id]); return; }
     
     if (category.playlistUrl) {
-      setIsCategoryLoading(true);
-      setCategoryChannels([]); 
+      setIsCategoryLoading(true); setCategoryChannels([]); 
       try {
         const text = await fetchM3UText(category.playlistUrl);
         let parsedChannels: Channel[] = [];
         if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
             const apiData = JSON.parse(text);
-            const items = Array.isArray(apiData) ? apiData : (apiData.channels || apiData.matches || []);
-            parsedChannels = items.map((m: any, idx: number) => ({
-                id: `ch-${category.id}-${m.match_id || m.id || idx}`,
-                name: String(m.title || m.name || `Channel ${idx}`),
-                logo: String(m.src || m.logo || m.banner || `https://ui-avatars.com/api/?name=TV`),
-                categoryId: category.id,
-                streamUrl: String(m.adfree_url || m.dai_url || m.url || m.streamUrl || '')
-            })).filter(c => c.streamUrl !== '');
+            const items = Array.isArray(apiData) ? apiData : (apiData.channels || apiData.matches || apiData.data || []);
+            parsedChannels = items.map((m: any, idx: number) => ({ 
+                id: `ch-${category.id}-${m.match_id || m.id || idx}`, 
+                name: String(m.title || m.name || `Channel ${idx}`), 
+                logo: String(m.src || m.logo || m.banner || `https://ui-avatars.com/api/?name=TV`), 
+                categoryId: category.id, 
+                streamUrl: String(m.adfree_url || m.dai_url || m.url || m.streamUrl || m.link || 'upcoming') 
+            }));
         } else {
-            const lines = text.split('\n');
-            let currentInfo: any = null;
+            const lines = text.split('\n'); let currentInfo: any = null;
             for (let i = 0; i < lines.length; i++) {
               const line = lines[i].trim();
               if (line.startsWith('#EXTINF:')) {
-                const logoMatch = line.match(/tvg-logo="([^"]+)"/);
-                const nameSplit = line.split(',');
-                const name = nameSplit.length > 1 ? nameSplit.pop()?.trim() || 'Unknown' : 'Unknown';
-                let logo = logoMatch ? logoMatch[1] : `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=2E8B57&color=fff`;
-                currentInfo = { name, logo };
+                const logoMatch = line.match(/tvg-logo="([^"]+)"/); const nameSplit = line.split(','); const name = nameSplit.length > 1 ? nameSplit.pop()?.trim() || 'Unknown' : 'Unknown';
+                currentInfo = { name, logo: logoMatch ? logoMatch[1] : `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=2E8B57&color=fff` };
               } else if (line.length > 0 && !line.startsWith('#') && currentInfo) {
-                parsedChannels.push({ id: `ch-${category.id}-${parsedChannels.length}`, name: String(currentInfo.name), logo: String(currentInfo.logo), categoryId: category.id, streamUrl: line });
-                currentInfo = null;
+                parsedChannels.push({ id: `ch-${category.id}-${parsedChannels.length}`, name: String(currentInfo.name), logo: String(currentInfo.logo), categoryId: category.id, streamUrl: line }); currentInfo = null;
               }
             }
         }
-        
-        if (parsedChannels.length > 0) {
-          setPlaylistCache(prev => ({ ...prev, [category.id]: parsedChannels }));
-          setCategoryChannels(parsedChannels);
+        if (parsedChannels.length > 0) { 
+            setPlaylistCache(prev => ({ ...prev, [category.id]: parsedChannels })); 
+            setCategoryChannels(parsedChannels); 
         }
-      } catch (error) { 
-          console.error("Playlist fetch error"); 
-      } finally { 
-          setIsCategoryLoading(false); 
-      }
+      } catch (error) { console.error(error); } finally { setIsCategoryLoading(false); }
     }
   };
 
   const playChannel = (ch: Channel) => {
-    setSelectedMatch({ id: ch.id, team1: ch.name, team2: 'Network Mirror', team1Logo: ch.logo, team2Logo: ch.logo, league: selectedCategory?.name || 'Live TV', status: 'Live', time: 'Live', sport: 'Other', streamUrl: ch.streamUrl, type: ch.categoryId === 'cat-sultan' ? 'Iframe' : undefined });
+    const isSultanCat = ch.categoryId === 'cat-sultan';
+    setSelectedMatch({ 
+        id: ch.id, 
+        team1: ch.name, 
+        team2: 'Network Mirror', 
+        team1Logo: ch.logo, 
+        team2Logo: ch.logo, 
+        league: selectedCategory?.name || 'Live TV', 
+        status: 'Live', 
+        time: 'Live', 
+        sport: 'Other', 
+        streamUrl: ch.streamUrl, 
+        type: isSultanCat ? 'Iframe' : undefined, 
+        multiLinks: isSultanCat ? [] : globalMultiLinks 
+    });
     setFloatingMatch(null);
     setActiveView('player');
+  };
+
+  const handlePlayMovie = (movie: any) => {
+    setSelectedMatch({
+        id: movie.id,
+        team1: movie.title,
+        team2: movie.year,
+        team1Logo: movie.poster,
+        team2Logo: movie.poster,
+        league: movie.genre,
+        status: 'Live',
+        time: movie.rating + ' ⭐',
+        sport: 'Movie',
+        streamUrl: movie.streamUrl,
+        type: movie.type || 'Video',
+        multiLinks: [] 
+    });
+    setLastMainView('movies');
+    setActiveView('player');
+  };
+
+  const handleNavChange = (v: any) => {
+    setActiveView(v); 
+    setLastMainView(v); 
   };
 
   const renderView = () => {
@@ -380,13 +417,8 @@ const App: React.FC = () => {
            <div className="w-20 h-20 bg-[#00b865]/10 rounded-full flex items-center justify-center mb-4 border border-[#00b865]/30 shadow-[0_0_30px_rgba(0,184,101,0.2)]">
              <Activity className="w-10 h-10 text-[#00b865] animate-pulse" />
            </div>
-           <h1 className="text-4xl font-black tracking-widest text-white mb-8 shadow-black drop-shadow-lg">
-             DAR<span className="text-[#00b865]">TV</span>
-           </h1>
-           <div className="w-48 h-1.5 bg-white/5 rounded-full overflow-hidden relative">
-              <div className="absolute top-0 left-0 h-full bg-gradient-to-r from-[#00b865] to-green-400 w-full animate-[progress_1.5s_ease-in-out_infinite] origin-left"></div>
-           </div>
-           <p className="mt-6 text-[10px] text-gray-500 font-bold uppercase tracking-[0.3em]">Starting Engine...</p>
+           <h1 className="text-4xl font-black tracking-widest text-white mb-8 shadow-black drop-shadow-lg">DAR<span className="text-[#00b865]">TV</span></h1>
+           <div className="w-48 h-1.5 bg-white/5 rounded-full overflow-hidden relative"><div className="absolute top-0 left-0 h-full bg-gradient-to-r from-[#00b865] to-green-400 w-full animate-[progress_1.5s_ease-in-out_infinite] origin-left"></div></div>
         </div>
       </div>
     );
@@ -402,20 +434,14 @@ const App: React.FC = () => {
       <Suspense fallback={<div className="flex justify-center items-center h-full"><Loader2 className="w-10 h-10 animate-spin text-[#00b865]" /></div>}>
         {activeView === 'about' && <AboutView />}
         {activeView === 'privacy' && <PrivacyPolicyView />}
-        {activeView === 'radio' && <RadioView onBack={() => setActiveView('categories')} />}
+        {activeView === 'radio' && <RadioView onBack={() => handleNavChange('categories')} />}
+        {activeView === 'movies' && <MoviesView movies={vodMovies} onPlay={handlePlayMovie} />}
         {activeView === 'live-events' && <LiveEventsView matches={matches} onSelectMatch={(m) => { setLastMainView('live-events'); setSelectedMatch(m); setActiveView('player'); }} />}
         
-        {/* 🚀 CUSTOM CATEGORIES PROPS PASSED HERE */}
-        {activeView === 'categories' && <CategoriesView 
-            onSelectCategory={handleCategorySelect} 
-            favoritesCount={favorites.length} 
-            cloudCategories={cloudCategories} 
-            customCategories={customCategories} 
-            onAddCustom={handleAddCustomPlaylist} 
-            onDeleteCustom={handleDeleteCustomPlaylist} 
-        />}
-
-        {activeView === 'channel-detail' && <ChannelListView channels={categoryChannels} category={selectedCategory} loading={isCategoryLoading} onBack={() => setActiveView('categories')} onSelectChannel={(ch) => { setLastMainView('channel-detail'); playChannel(ch); }} />}
+        {activeView === 'categories' && <CategoriesView onSelectCategory={handleCategorySelect} favoritesCount={favorites.length} cloudCategories={cloudCategories} customCategories={customCategories} onAddCustom={handleAddCustomPlaylist} onDeleteCustom={handleDeleteCustomPlaylist} />}
+        
+        {activeView === 'channel-detail' && <ChannelListView channels={categoryChannels} category={selectedCategory} loading={isCategoryLoading} onBack={() => handleNavChange('categories')} onSelectChannel={(ch) => { setLastMainView('channel-detail'); playChannel(ch); }} />}
+        
         {activeView === 'player' && <PlayerView match={selectedMatch} onBack={() => setActiveView(lastMainView)} relatedChannels={categoryChannels.length > 0 ? categoryChannels.slice(0, 40) : allChannels.slice(0, 40)} onSelectRelated={playChannel} />}
       </Suspense>
     );
@@ -425,29 +451,21 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-row h-screen overflow-hidden bg-[#121212] text-white">
-      {!isFullPlayer && <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} activeView={activeView as View} onNavigate={(v) => { setActiveView(v); setLastMainView(v); setSidebarOpen(false); }} />}
+      {!isFullPlayer && <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} activeView={activeView as any} onNavigate={handleNavChange} />}
       <div className="flex flex-col flex-1 relative min-w-0">
         {!isFullPlayer && (
           <Header 
-            title={activeView === 'categories' ? 'Playlists' : activeView === 'channel-detail' ? (selectedCategory?.name || 'Channels') : activeView === 'radio' ? 'Virtual Radio' : 'DAR TEVE'} 
-            onOpenSidebar={() => setSidebarOpen(true)} showBack={activeView === 'channel-detail' || activeView === 'radio'} onBack={() => setActiveView('categories')} searchQuery={globalSearchQuery} onSearchChange={setGlobalSearchQuery} 
+            title={activeView === 'categories' ? 'Playlists' : activeView === 'movies' ? 'Movies & VOD' : activeView === 'channel-detail' ? (selectedCategory?.name || 'Channels') : activeView === 'radio' ? 'Virtual Radio' : 'DAR TEVE'} 
+            onOpenSidebar={() => setSidebarOpen(true)} showBack={activeView === 'channel-detail' || activeView === 'radio'} onBack={() => handleNavChange('categories')} searchQuery={globalSearchQuery} onSearchChange={setGlobalSearchQuery} 
           />
         )}
         <main className={`flex-1 overflow-y-auto scrollbar-hide ${!isFullPlayer ? 'pb-24 md:pb-6' : ''}`}>
           <div className={`${!isFullPlayer ? 'max-w-[1600px] mx-auto' : 'w-full h-full'}`}>{renderView()}</div>
         </main>
-        {!isFullPlayer && <BottomNav activeView={(activeView === 'channel-detail' || activeView === 'radio') ? 'categories' : activeView as View} onViewChange={(v) => { setActiveView(v); setLastMainView(v); }} />}
+        {!isFullPlayer && <BottomNav activeView={(activeView === 'channel-detail' || activeView === 'radio') ? 'categories' : activeView} onViewChange={handleNavChange} />}
       </div>
       {floatingMatch && <FloatingPlayer match={floatingMatch} onExpand={() => { setSelectedMatch(floatingMatch); setFloatingMatch(null); setActiveView('player'); }} onClose={() => setFloatingMatch(null)} />}
-      {showLinkModal && <LinkModal match={selectedMatch} onClose={() => setShowLinkModal(false)} onSelect={() => {}} />}
-      
-      <style>{`
-        @keyframes progress {
-          0% { transform: scaleX(0); opacity: 1; }
-          50% { transform: scaleX(1); opacity: 1; }
-          100% { transform: scaleX(1); opacity: 0; }
-        }
-      `}</style>
+      <style>{`@keyframes progress { 0% { transform: scaleX(0); opacity: 1; } 50% { transform: scaleX(1); opacity: 1; } 100% { transform: scaleX(1); opacity: 0; } }`}</style>
     </div>
   );
 };
