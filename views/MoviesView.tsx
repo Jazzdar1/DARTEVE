@@ -1,88 +1,216 @@
-import React, { useState } from 'react';
-import { Play, Star, Info, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Match, Channel } from '../types';
+import { ArrowLeft, Maximize, Minimize, Tv2, PlayCircle, Radio, Clock, AlertCircle } from 'lucide-react';
+import Hls from 'hls.js';
 
-interface MoviesViewProps {
-  movies: any[];
-  onPlay: (movie: any) => void;
+interface PlayerViewProps {
+  match: Match | null;
+  onBack: () => void;
+  relatedChannels: Channel[];
+  onSelectRelated: (channel: Channel) => void;
+  isPlaylistMode?: boolean;
 }
 
-export default function MoviesView({ movies, onPlay }: MoviesViewProps) {
-    const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
+const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels, onSelectRelated, isPlaylistMode = false }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
-    if (!movies || movies.length === 0) {
-        return <div className="flex items-center justify-center h-full text-gray-500 font-bold">No movies found...</div>;
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showControls, setShowControls] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const streamUrl = match?.streamUrl || '';
+  const isUpcoming = streamUrl === 'upcoming' || streamUrl === '';
+  
+  // Basic Check: Kya isay iframe mein chalana hai?
+  const isIframe = 
+      match?.type === 'Iframe' || 
+      (match as any)?.isSultan || 
+      streamUrl.includes('.html') || 
+      streamUrl.includes('.php') || 
+      streamUrl.includes('embed');
+
+  useEffect(() => {
+    if (!streamUrl || isUpcoming || isIframe) {
+        if (isIframe) {
+            // Iframe ke liye loading jaldi hata do
+            const t = setTimeout(() => setLoading(false), 1000);
+            return () => clearTimeout(t);
+        }
+        return;
     }
 
-    const heroMovie = movies[0];
+    setLoading(true);
+    setError(null);
+    const video = videoRef.current;
+    if (!video) return;
 
-    return (
-        <div className="flex flex-col w-full min-h-screen bg-[#0f1115] text-white">
-            {/* 🌟 HERO SECTION (Top Featured Movie) */}
-            <div className="relative w-full h-[55vh] md:h-[70vh] bg-black">
-                <div className="absolute inset-0">
-                    <img src={heroMovie.backdrop || heroMovie.poster} alt="Hero" className="w-full h-full object-cover opacity-50" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#0f1115] via-[#0f1115]/40 to-transparent" />
-                </div>
-                <div className="absolute bottom-0 left-0 p-6 md:p-12 w-full md:w-2/3 z-10 animate-in slide-in-from-bottom duration-700">
-                    <span className="text-[#00b865] font-black tracking-widest text-xs uppercase mb-3 block border border-[#00b865]/50 bg-[#00b865]/10 w-max px-3 py-1 rounded-full">{heroMovie.genre}</span>
-                    <h1 className="text-4xl md:text-6xl font-black mb-4 shadow-black drop-shadow-2xl leading-tight">{heroMovie.title}</h1>
-                    <p className="text-sm md:text-base text-gray-300 mb-6 line-clamp-3 max-w-xl">{heroMovie.description}</p>
-                    <div className="flex gap-3 md:gap-4">
-                        <button onClick={() => onPlay(heroMovie)} className="flex items-center justify-center gap-2 bg-[#00b865] text-black px-6 py-3 md:px-8 md:py-3.5 rounded-xl font-black hover:scale-105 transition-transform shadow-[0_0_20px_rgba(0,184,101,0.4)]">
-                            <Play fill="currentColor" size={20} /> PLAY NOW
-                        </button>
-                        <button onClick={() => setSelectedMovie(heroMovie)} className="flex items-center justify-center gap-2 bg-white/10 backdrop-blur-md text-white border border-white/20 px-6 py-3 rounded-xl font-bold hover:bg-white/20 transition-colors">
-                            <Info size={20} /> Details
-                        </button>
-                    </div>
-                </div>
-            </div>
+    const handlePlay = () => setLoading(false);
+    video.addEventListener('playing', handlePlay);
 
-            {/* 🎬 MOVIES GRID (Netflix Style) */}
-            <div className="px-4 md:px-12 -mt-6 md:-mt-10 z-20 relative pb-24">
-                <h2 className="text-lg md:text-xl font-black mb-6 border-l-4 border-[#00b865] pl-3 tracking-wide">Trending Now</h2>
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-3 md:gap-4">
-                    {movies.slice(1).map((movie, idx) => (
-                        <div key={idx} className="group relative rounded-xl overflow-hidden cursor-pointer transition-all duration-300 hover:scale-[1.05] hover:z-30 hover:shadow-[0_0_25px_rgba(0,184,101,0.2)] bg-[#1a1d24]" onClick={() => setSelectedMovie(movie)}>
-                            <img src={movie.poster} alt={movie.title} className="w-full aspect-[2/3] object-cover" loading="lazy" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3">
-                                <h3 className="text-xs font-bold text-white truncate">{movie.title}</h3>
-                                <div className="flex items-center justify-between mt-1">
-                                    <span className="flex items-center gap-1 text-[9px] text-yellow-500 font-bold"><Star size={10} fill="currentColor"/> {movie.rating}</span>
-                                    <span className="text-[9px] text-gray-400 font-bold">{movie.year}</span>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
+    // Simple HLS Setup
+    if (Hls.isSupported() && streamUrl.includes('.m3u8')) {
+      const hls = new Hls({ maxMaxBufferLength: 30 });
+      hlsRef.current = hls;
+      
+      hls.loadSource(streamUrl);
+      hls.attachMedia(video);
+      
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(e => console.log("Auto-play prevented", e));
+      });
+      
+      hls.on(Hls.Events.ERROR, (e, data) => {
+        if (data.fatal) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad();
+          } else {
+            setError("Stream is offline or format not supported.");
+            setLoading(false);
+          }
+        }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // For Safari (Native HLS)
+      video.src = streamUrl;
+      video.play().catch(e => console.log("Auto-play prevented", e));
+    } else {
+      // For raw mp4 or other basic formats
+      video.src = streamUrl;
+      video.play().catch(e => console.log("Auto-play prevented", e));
+    }
 
-            {/* 🍿 DETAILS MODAL */}
-            {selectedMovie && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setSelectedMovie(null)}>
-                    <div className="bg-[#1a1d24] rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 border border-white/10" onClick={e => e.stopPropagation()}>
-                        <div className="relative h-64 md:h-80 w-full">
-                            <img src={selectedMovie.backdrop || selectedMovie.poster} className="w-full h-full object-cover opacity-40" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-[#1a1d24] via-[#1a1d24]/50 to-transparent" />
-                            <button onClick={() => setSelectedMovie(null)} className="absolute top-4 right-4 p-2 bg-black/50 hover:bg-red-500 text-white rounded-full transition-colors backdrop-blur-md"><X size={20}/></button>
-                            <div className="absolute bottom-6 left-6 right-6">
-                                <h2 className="text-3xl md:text-4xl font-black text-white mb-3 drop-shadow-lg">{selectedMovie.title}</h2>
-                                <div className="flex flex-wrap items-center gap-3 text-xs font-bold text-gray-300">
-                                    <span className="bg-[#00b865]/20 text-[#00b865] px-2 py-1 rounded uppercase tracking-wider">{selectedMovie.genre}</span>
-                                    <span className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded backdrop-blur-md"><Star size={12} className="text-yellow-500" fill="currentColor"/> {selectedMovie.rating}</span>
-                                    <span className="bg-black/40 px-2 py-1 rounded backdrop-blur-md">{selectedMovie.year}</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="p-6 md:p-8">
-                            <p className="text-gray-300 text-sm md:text-base leading-relaxed mb-8">{selectedMovie.description}</p>
-                            <button onClick={() => { onPlay(selectedMovie); setSelectedMovie(null); }} className="w-full flex items-center justify-center gap-3 bg-[#00b865] text-black py-4 rounded-xl font-black text-lg hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(0,184,101,0.3)]">
-                                <Play fill="currentColor" size={24}/> START WATCHING
-                            </button>
-                        </div>
-                    </div>
-                </div>
+    return () => {
+      video.removeEventListener('playing', handlePlay);
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [streamUrl, isUpcoming, isIframe]);
+
+  // Fullscreen Logic
+  const toggleFullscreen = async () => {
+    if (!containerRef.current) return;
+    if (!document.fullscreenElement) {
+      await containerRef.current.requestFullscreen().catch(e => console.log(e));
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  if (!match) return null;
+
+  return (
+    <div className="flex flex-col h-screen bg-[#0f1115] overflow-hidden text-white">
+      
+      {/* VIDEO CONTAINER */}
+      <div ref={containerRef} className={`relative w-full bg-black flex flex-col justify-center select-none ${isFullscreen && !isIframe ? 'h-screen fixed inset-0 z-50' : 'aspect-video'}`}>
+        
+        {isUpcoming ? (
+           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f1115] z-50 p-6 text-center">
+             <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between">
+               <button onClick={onBack} className="p-2 bg-white/10 rounded-full hover:bg-[#00b865]"><ArrowLeft /></button>
+             </div>
+             <Clock className="w-16 h-16 text-yellow-500 mb-4 animate-pulse" />
+             <h2 className="text-2xl font-black mb-2">{match.team1}</h2>
+             <span className="bg-yellow-500/20 text-yellow-500 px-3 py-1 rounded-full text-xs font-bold uppercase mb-4">Upcoming Match</span>
+             <p className="text-gray-400 text-xs">Link will be available when the match starts.</p>
+           </div>
+        ) : (
+          <>
+            {/* Loading & Error Overlays */}
+            {loading && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/80">
+                <div className="w-12 h-12 border-4 border-[#00b865] border-t-transparent rounded-full animate-spin mb-4"></div>
+                <p className="text-[#00b865] text-xs font-bold uppercase tracking-widest animate-pulse">Loading...</p>
+              </div>
             )}
+            
+            {error && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-50 p-4 text-center">
+                <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
+                <p className="text-gray-200 font-bold mb-4">{error}</p>
+                <button onClick={onBack} className="px-6 py-2 bg-gray-700 rounded-lg font-bold">Go Back</button>
+              </div>
+            )}
+
+            {/* PLAYER: Iframe OR Native Video */}
+            <div className="absolute inset-0 w-full h-full z-10" onClick={() => setShowControls(!showControls)}>
+                {isIframe ? (
+                    <iframe 
+                        src={streamUrl} 
+                        className="w-full h-full border-none bg-black" 
+                        allow="autoplay; fullscreen" 
+                        allowFullScreen 
+                    />
+                ) : (
+                    <video 
+                        ref={videoRef} 
+                        className="w-full h-full object-contain bg-black" 
+                        playsInline 
+                        autoPlay 
+                        controls={showControls} // Native controls on click
+                    />
+                )}
+            </div>
+
+            {/* CUSTOM OVERLAY CONTROLS (Only for top/bottom bar) */}
+            <div className={`absolute inset-0 flex flex-col justify-between bg-gradient-to-b from-black/80 via-transparent to-black/80 transition-opacity duration-300 z-40 pointer-events-none ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+              
+              {/* TOP BAR */}
+              <div className="flex items-center justify-between p-4 pointer-events-auto">
+                <button onClick={isFullscreen ? toggleFullscreen : onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865]"><ArrowLeft /></button>
+                <h1 className="font-bold text-sm truncate px-4">{match.team1}</h1>
+                <div className="w-10"></div> {/* Spacer */}
+              </div>
+
+              {/* BOTTOM BAR (Fullscreen toggle for Native video) */}
+              {!isIframe && (
+                  <div className="flex items-center justify-end p-4 pointer-events-auto pb-8 md:pb-4">
+                    <button onClick={toggleFullscreen} className="p-2 bg-black/50 hover:bg-white/20 rounded-full">
+                        {isFullscreen ? <Minimize /> : <Maximize />}
+                    </button>
+                  </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* CHANNELS LIST (Below Player) */}
+      {!isFullscreen && (
+        <div className="flex-1 overflow-y-auto bg-[#0f1115] pb-24 p-4">
+          <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <Tv2 size={16} /> {isPlaylistMode ? 'Channels from this Playlist' : 'All Channels'}
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {relatedChannels.map((channel, idx) => (
+              <button 
+                key={idx} 
+                onClick={() => {
+                  setLoading(true);
+                  setError(null);
+                  onSelectRelated(channel);
+                }} 
+                className={`flex items-center gap-4 p-3 border rounded-xl text-left transition-colors ${match.id === channel.id ? 'bg-[#00b865]/10 border-[#00b865]/50' : 'bg-[#1a1d23] border-white/5 hover:bg-white/5'}`}
+              >
+                <img src={channel.logo} className="w-10 h-10 rounded-lg object-contain bg-black" onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = `https://ui-avatars.com/api/?name=TV` }} />
+                <div className="flex-1 min-w-0">
+                  <span className={`text-sm font-bold truncate block ${match.id === channel.id ? 'text-[#00b865]' : 'text-gray-200'}`}>{channel.name}</span>
+                </div>
+                <PlayCircle className="w-6 h-6 text-gray-600 shrink-0" />
+              </button>
+            ))}
+          </div>
         </div>
-    );
-}
+      )}
+    </div>
+  );
+};
+
+export default PlayerView;
