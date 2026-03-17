@@ -5,7 +5,7 @@ import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 import LinkModal from './components/LinkModal';
 import FloatingPlayer from './components/FloatingPlayer';
-import { WifiOff, RefreshCw, Loader2, Activity, ShieldCheck, X } from 'lucide-react';
+import { WifiOff, RefreshCw, Loader2, Activity } from 'lucide-react';
 
 const MoviesView = lazy(() => import('./views/MoviesView'));
 const LiveEventsView = lazy(() => import('./views/LiveEvents'));
@@ -38,7 +38,7 @@ const TSPORTS_COMBINE_URL = 'https://raw.githubusercontent.com/abusaeeidx/T-Spor
 const LX_URL = 'https://raw.githubusercontent.com/raid35/channel-links/main/LX.m3u';
 const BEIN_URL = 'https://is.gd/xdFAu6.m3u'; 
 
-// 🔥 NAYI INDIAN PLAYLIST
+// 🔥 NAYI INDIAN PLAYLIST YAHAN ADD HUI HAI
 const INDIAN_URL = 'https://raw.githubusercontent.com/praneshpaulose/Kerala/af18ac3b046b0121c5429c898a2db197ceaeee0a/FMall.m3u';
 
 const App: React.FC = () => {
@@ -68,9 +68,6 @@ const App: React.FC = () => {
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [globalMultiLinks, setGlobalMultiLinks] = useState<any[]>([]);
-
-  // 🔥 DNS WARNING BANNER STATE
-  const [showDnsTip, setShowDnsTip] = useState(true);
 
   useEffect(() => {
     window.history.pushState(null, '', window.location.href);
@@ -149,6 +146,7 @@ const App: React.FC = () => {
 
       newCloudCats.push({ id: 'cat-combined', name: '📺 All Live TV (Pirates)', playlistUrl: DEFAULT_M3U });
 
+      // 🔥 SAARI PLAYLISTS (Nayi Indian playlist list mein shamil hai)
       const apiConfigs: any[] = [
         { id: 'cat-sultan', name: '👑 Sultan VIP', url: SULTAN_URL, type: 'json', key: 'channels' },
         { id: 'cat-group-b', name: 'Hotstar LIVE', url: GROUP_B_URL, type: 'json', key: 'matches' },
@@ -156,7 +154,10 @@ const App: React.FC = () => {
         { id: 'cat-vip', name: '⚡ VIP Cricket', url: VIP_URL, type: 'json', key: 'channels' },
         { id: 'cat-lx', name: '🔥 LX Premium', url: LX_URL, type: 'm3u', key: 'channels' }, 
         { id: 'cat-bein', name: '⚽ Bein Sports', url: BEIN_URL, type: 'm3u', key: 'channels' }, 
+        
+        // 👇 INDIAN KHAZANA
         { id: 'cat-indian', name: '🇮🇳 Indian', url: INDIAN_URL, type: 'm3u', key: 'channels' }, 
+        
         { id: 'cat-tsports-json', name: '🏆 T-Sports Data', url: TSPORTS_JSON_URL, type: 'json', key: 'channels' },
         { id: 'cat-tsports-comb', name: '🏆 T-Sports Combine', url: TSPORTS_COMBINE_URL, type: 'm3u', key: 'channels' },
         { id: 'cat-cricket', name: 'Cricket TV', url: CRICKET_URL, type: 'json', key: 'channels' },
@@ -266,6 +267,7 @@ const App: React.FC = () => {
       
       setGlobalMultiLinks(allSportsLinks);
 
+      const now = Date.now();
       const genericMatches = rawMatches.map((m: any, idx: number) => {
           const statusRaw = String(m.status || m.match_status || '').toUpperCase();
           let status = 'Live'; let isHot = true;
@@ -385,28 +387,25 @@ const App: React.FC = () => {
   };
 
   const handlePlayMovie = (movie: any) => {
-    // 🔥 SULTAN HACK USED HERE FOR INSTANT MOVIE PLAYBACK
-    const isSultanType = movie.id.includes('cat-sultan');
     setSelectedMatch({
         id: movie.id,
-        team1: movie.title || movie.team1,
-        team2: movie.year || '',
-        team1Logo: movie.logo || movie.poster,
-        team2Logo: movie.logo || movie.poster,
-        league: movie.genre || 'Movie',
+        team1: movie.title,
+        team2: movie.year,
+        team1Logo: movie.poster,
+        team2Logo: movie.poster,
+        league: movie.genre,
         status: 'Live',
-        time: 'HD Stream',
+        time: movie.rating + ' ⭐',
         sport: 'Movie',
-        streamUrl: movie.streamUrl || movie.url,
-        type: 'Iframe',
-        isSultan: isSultanType,
+        streamUrl: movie.streamUrl,
+        type: movie.type || 'Video',
         multiLinks: [] 
     });
     setLastMainView('movies');
     setActiveView('player');
   };
 
-  const handleNavChange = (v: AppScreen) => {
+  const handleNavChange = (v: any) => {
     setActiveView(v); 
     setLastMainView(v); 
   };
@@ -433,31 +432,17 @@ const App: React.FC = () => {
 
     return (
       <Suspense fallback={<div className="flex justify-center items-center h-full"><Loader2 className="w-10 h-10 animate-spin text-[#00b865]" /></div>}>
-        {/* 🔥 DNS TIP INJECTED HERE SO IT SHOWS IN MAIN VIEW ONLY */}
-        {showDnsTip && activeView !== 'player' && (
-            <div className="m-4 p-4 bg-gradient-to-r from-blue-900/40 to-transparent border border-blue-500/30 rounded-xl flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <ShieldCheck className="text-blue-400" />
-                    <div>
-                        <h4 className="text-xs font-bold text-white">Stream Blocked?</h4>
-                        <p className="text-[10px] text-gray-400">Set Private DNS to <code className="bg-black/50 px-1 rounded text-blue-300">dns.google</code> in settings to bypass ISP blocks.</p>
-                    </div>
-                </div>
-                <button onClick={() => setShowDnsTip(false)}><X size={16} className="text-gray-400" /></button>
-            </div>
-        )}
-
         {activeView === 'about' && <AboutView />}
         {activeView === 'privacy' && <PrivacyPolicyView />}
         {activeView === 'radio' && <RadioView onBack={() => handleNavChange('categories')} />}
-        {activeView === 'movies' && <MoviesView onPlay={handlePlayMovie} />}
-        {activeView === 'live-events' && <LiveEventsView matches={matches} onSelectMatch={(m: any) => { setLastMainView('live-events'); setSelectedMatch(m); setActiveView('player'); }} />}
+        {activeView === 'movies' && <MoviesView movies={vodMovies} onPlay={handlePlayMovie} />}
+        {activeView === 'live-events' && <LiveEventsView matches={matches} onSelectMatch={(m) => { setLastMainView('live-events'); setSelectedMatch(m); setActiveView('player'); }} />}
         
         {activeView === 'categories' && <CategoriesView onSelectCategory={handleCategorySelect} favoritesCount={favorites.length} cloudCategories={cloudCategories} customCategories={customCategories} onAddCustom={handleAddCustomPlaylist} onDeleteCustom={handleDeleteCustomPlaylist} />}
         
-        {activeView === 'channel-detail' && <ChannelListView channels={categoryChannels} category={selectedCategory} loading={isCategoryLoading} onBack={() => handleNavChange('categories')} onSelectChannel={(ch: any) => { setLastMainView('channel-detail'); playChannel(ch); }} />}
+        {activeView === 'channel-detail' && <ChannelListView channels={categoryChannels} category={selectedCategory} loading={isCategoryLoading} onBack={() => handleNavChange('categories')} onSelectChannel={(ch) => { setLastMainView('channel-detail'); playChannel(ch); }} />}
         
-        {activeView === 'player' && <PlayerView match={selectedMatch} onBack={() => setActiveView(lastMainView)} relatedChannels={activeView === 'channel-detail' || activeView === 'categories' ? categoryChannels : allChannels.slice(0, 40)} onSelectRelated={playChannel} isPlaylistMode={activeView === 'channel-detail' || activeView === 'categories'} />}
+        {activeView === 'player' && <PlayerView match={selectedMatch} onBack={() => setActiveView(lastMainView)} relatedChannels={categoryChannels.length > 0 ? categoryChannels.slice(0, 40) : allChannels.slice(0, 40)} onSelectRelated={playChannel} />}
       </Suspense>
     );
   };
@@ -466,7 +451,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-row h-screen overflow-hidden bg-[#121212] text-white">
-      {!isFullPlayer && <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} activeView={activeView} onNavigate={handleNavChange} />}
+      {!isFullPlayer && <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} activeView={activeView as any} onNavigate={handleNavChange} />}
       <div className="flex flex-col flex-1 relative min-w-0">
         {!isFullPlayer && (
           <Header 
