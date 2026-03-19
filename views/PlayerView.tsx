@@ -11,8 +11,7 @@ interface PlayerViewProps {
   isPlaylistMode?: boolean; 
 }
 
-// 🔥 ADDED: 'super-proxy' engine
-type EngineType = 'default' | 'dplayer' | 'shaka' | 'hls-advanced' | 'clappr' | 'videojs' | 'super-proxy';
+type EngineType = 'default' | 'plyr' | 'super-proxy' | 'dplayer' | 'shaka' | 'hls-advanced' | 'clappr' | 'videojs';
 
 const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels, onSelectRelated, isPlaylistMode = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -94,14 +93,14 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
 
   const handleFallback = useCallback(() => {
     setPlayerEngine(prev => {
-      const engines: EngineType[] = ['default', 'super-proxy', 'dplayer', 'shaka'];
+      const engines: EngineType[] = ['default', 'plyr', 'super-proxy', 'dplayer', 'shaka', 'clappr', 'videojs'];
       const idx = engines.indexOf(prev);
       if (idx !== -1 && idx < engines.length - 1) {
         setError(`Stream Blocked. Auto-Switching to ${engines[idx + 1].toUpperCase()}...`);
         setLoading(true);
         return engines[idx + 1];
       } else {
-        setError("Origin Blocked by HTTPS! Turn on 'Super Proxy Player' from settings or use External Player.");
+        setError("Origin Blocked! Try External Player.");
         setLoading(false);
         return prev;
       }
@@ -111,13 +110,54 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
   const generatePlayerHtml = (engine: EngineType, url: string) => {
     const errorSpy = `<script>function sendErr() { window.parent.postMessage({action: 'STREAM_ERROR'}, '*'); }</script>`;
     
-    // 🔥 THE MAGIC ENGINE: Intercepts every single HTTP request and forces it through an HTTPS proxy
+    // 🔥 EXACT PLYR SCRIPT PROVIDED BY USER
+    if (engine === 'plyr') return `<!DOCTYPE html><html><head>
+        <meta charset="UTF-8">
+        <link rel="stylesheet" href="https://cdn.plyr.io/3.5.6/plyr.css">
+        <style>
+            body { background: #111; margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; }
+            .plyr { height: 100%; width: 100%; }
+        </style>
+    </head><body>
+        <video id="player" controls playsinline class="js-player"></video>
+        ${errorSpy}
+        <script src="https://cdn.plyr.io/3.5.6/plyr.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+        <script>
+            const video = document.getElementById("player");
+            const streamUrl = '${url}';
+            
+            try {
+                let player = new Plyr(video, { autoplay: true });
+                
+                if (Hls.isSupported() && streamUrl.includes('.m3u8')) {
+                    const hls = new Hls();
+                    hls.loadSource(streamUrl);
+                    hls.attachMedia(video);
+                    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                        video.play().catch(e => console.log("Autoplay blocked", e));
+                    });
+                    hls.on(Hls.Events.ERROR, function(e, data) {
+                        if(data.fatal) {
+                            if(data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+                            else sendErr();
+                        }
+                    });
+                } else {
+                    video.src = streamUrl;
+                    video.play().catch(e => console.log("Autoplay blocked", e));
+                }
+            } catch(e) {
+                sendErr();
+            }
+        </script>
+    </body></html>`;
+
     if (engine === 'super-proxy') return `<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script><style>body{margin:0;background:#000;overflow:hidden;} video{width:100%;height:100vh;outline:none;}</style></head><body><video id="hls-video" controls autoplay playsinline></video>${errorSpy}<script>
         if(Hls.isSupported()){
             var video=document.getElementById('hls-video');
             var hls=new Hls({
                 maxBufferLength: 30,
-                // THE HACK: Intercept and rewrite all HTTP requests to bypass Vercel's HTTPS blocks
                 xhrSetup: function(xhr, requestUrl) {
                     if (requestUrl.startsWith('http://')) {
                         requestUrl = 'https://corsproxy.io/?' + encodeURIComponent(requestUrl);
@@ -131,9 +171,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
                 if(data.fatal){
                     if(data.type === Hls.ErrorTypes.NETWORK_ERROR){
                         hls.startLoad();
-                    } else {
-                        sendErr();
-                    }
+                    } else { sendErr(); }
                 }
             });
             video.play().catch(e=>console.log(e));
@@ -194,11 +232,11 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
     const video = videoRef.current;
     if (!video) { clearFallbackTimer(); window.removeEventListener('message', handleMessage); return; }
 
+    video.volume = volume;
     video.addEventListener('playing', handleSuccess);
     video.addEventListener('loadeddata', handleSuccess);
-    video.volume = volume;
 
-    if (Hls.isSupported()) {
+    if (Hls.isSupported() && finalStreamUrl.includes('.m3u8')) {
       const hls = new Hls({ maxMaxBufferLength: 30, liveSyncDurationCount: 3 });
       hlsRef.current = hls;
       
@@ -231,6 +269,9 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
       video.src = finalStreamUrl; 
       video.play().catch(() => { if(isMounted) setLoading(false); }); 
       video.addEventListener('error', () => { if (isMounted && !hasPlayedRef.current) { clearFallbackTimer(); handleFallback(); } });
+    } else {
+      video.src = finalStreamUrl; 
+      video.play().catch(() => { if(isMounted) setLoading(false); }); 
     }
 
     return () => { 
@@ -364,7 +405,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
                 <p className="text-gray-200 font-bold text-sm mb-4 max-w-sm">{error}</p>
                 {!error.includes("Switching") && (
                    <div className="flex gap-3">
-                       <button onClick={() => { setError(null); setLoading(true); setPlayerEngine('super-proxy'); }} className="px-6 py-2 bg-blue-600 rounded-lg font-bold text-white shadow-lg">Try Proxy Player</button>
+                       <button onClick={() => { setError(null); setLoading(true); setPlayerEngine('plyr'); }} className="px-6 py-2 bg-blue-600 rounded-lg font-bold text-white shadow-lg">Try Plyr Player</button>
                        <button onClick={openInExternalPlayer} className="px-6 py-2 bg-[#00b865] rounded-lg font-bold text-black shadow-lg flex items-center gap-2"><ExternalLink size={16}/> External Player</button>
                    </div>
                 )}
@@ -375,7 +416,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
                <div className="absolute inset-0 bg-black pointer-events-none z-20" style={{ opacity: 1 - brightness }}></div>
             )}
 
-            {indicator.show && (
+            {indicator.show && !isStrictIframe && playerEngine === 'default' && (
                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/60 text-white px-6 py-4 rounded-xl flex flex-col items-center gap-2 z-50">
                    {indicator.type === 'vol' ? <Volume2 className="w-8 h-8 text-[#00b865]" /> : <Sun className="w-8 h-8 text-yellow-500" />}
                    <span className="font-bold text-lg">{Math.round(indicator.val * 100)}%</span>
@@ -403,7 +444,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
 
             {!isStrictIframe && customIframeHtml !== '' && (
               <>
-                 <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
+                 <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/50 to-transparent pointer-events-none hover:opacity-100 opacity-0 transition-opacity">
                   <button onClick={onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition pointer-events-auto"><ArrowLeft className="w-6 h-6 text-white" /></button>
                   <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition pointer-events-auto"><Settings className="w-6 h-6 text-white" /></button>
                 </div>
@@ -462,21 +503,15 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
                 <button onClick={() => setShowSettings(false)} className="text-gray-400 hover:text-white font-bold text-xl p-1">×</button>
             </div>
 
-            {/* VERCEL PROXY TOGGLE */}
-            <div className="mb-6 pb-6 border-b border-white/10">
-                <div className="flex justify-between items-center mb-2">
-                    <h4 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
-                        <ShieldCheck size={16} className="text-blue-500"/> Vercel Proxy
-                    </h4>
-                    <button 
-                        onClick={() => { setUseProxy(!useProxy); setLoading(true); }}
-                        className={`w-10 h-5 rounded-full relative transition-colors ${useProxy ? 'bg-[#00b865]' : 'bg-gray-600'}`}
-                    >
-                        <div className={`w-3 h-3 bg-white rounded-full absolute top-1 transition-transform ${useProxy ? 'left-6' : 'left-1'}`} />
-                    </button>
+            <div className="mb-6 pb-6 border-b border-white/10 text-center">
+                <div className="flex justify-center items-center mb-3">
+                    <ShieldAlert size={28} className="text-[#00b865] opacity-80"/>
                 </div>
+                <h4 className="text-xs font-black text-white uppercase tracking-wider mb-2">Network Assistant</h4>
                 <p className="text-[10px] text-gray-400 leading-relaxed">
-                   If hosted on GitHub/Vercel (HTTPS) and stream is not loading due to Mixed Content or CORS, turn this ON.
+                   If a channel provides Audio only, it may be a HEVC format stream. 
+                   <br/><br/>
+                   Please click the <b>External Player (↗)</b> button in the top bar to play it in full HD using VLC or MX Player.
                 </p>
             </div>
             
@@ -491,7 +526,9 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
                                     <button key={index} onClick={() => changeQuality(index)} className={`text-left px-3 py-2 rounded text-xs font-bold transition flex justify-between items-center ${currentQuality === index ? 'bg-[#00b865] text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'}`}>
                                         <span className="flex items-center">
                                             {level.height ? `${level.height}p` : `Stream ${index + 1}`}
+                                            {level.height >= 720 && <span className="bg-blue-600 text-white text-[8px] px-1.5 py-0.5 rounded font-black ml-2 uppercase tracking-wider">HD</span>}
                                         </span>
+                                        {level.bitrate ? <span className="text-[10px] opacity-60">{Math.round(level.bitrate / 1000)} kbps</span> : null}
                                     </button>
                                 ))}
                             </>
@@ -510,10 +547,17 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
                 
                 <div className="grid grid-cols-2 gap-2 mb-2">
                   <button onClick={() => setPlayerEngine('default')} className={`px-2 py-2 rounded text-[10px] font-bold ${playerEngine === 'default' ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>Native</button>
+                  
+                  <button onClick={() => setPlayerEngine('plyr')} className={`px-2 py-2 rounded text-[10px] font-bold flex flex-col items-center gap-1 ${playerEngine === 'plyr' ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>
+                      <span>Plyr.io</span>
+                      <span className="text-[7px] bg-black/30 px-1 rounded uppercase text-[#00b865]">Clean UI</span>
+                  </button>
+
                   <button onClick={() => setPlayerEngine('super-proxy')} className={`px-2 py-2 rounded text-[10px] font-bold flex flex-col items-center gap-1 ${playerEngine === 'super-proxy' ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>
                       <span>Super Proxy</span>
                       <span className="text-[7px] bg-black/30 px-1 rounded uppercase text-yellow-500">HTTP Fix</span>
                   </button>
+
                   <button onClick={() => setPlayerEngine('dplayer')} className={`px-2 py-2 rounded text-[10px] font-bold flex flex-col items-center gap-1 ${playerEngine === 'dplayer' ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>
                       <span>DPlayer Pro</span>
                       <span className="text-[7px] bg-black/30 px-1 rounded uppercase text-green-400">All Formats</span>
