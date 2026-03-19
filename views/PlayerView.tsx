@@ -13,6 +13,8 @@ interface PlayerViewProps {
 
 type EngineType = 'default' | 'plyr' | 'super-proxy' | 'dplayer' | 'shaka' | 'hls-advanced' | 'clappr' | 'videojs';
 
+const CF_PROXY = 'https://dartv-super-proxy.darajazb.workers.dev/?url=';
+
 const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels, onSelectRelated, isPlaylistMode = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -50,7 +52,8 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
   const [showControls, setShowControls] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
 
-  const cleanStreamUrl = String(currentStream || '').split('|')[0].trim();
+  const rawStreamUrl = String(currentStream || '');
+  const cleanStreamUrl = rawStreamUrl.split('|')[0].trim();
   const isUpcomingMatch = cleanStreamUrl === 'upcoming' || cleanStreamUrl === '';
   const matchId = String(match?.id || '');
 
@@ -59,16 +62,17 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
   
   const isStrictIframe = 
       matchId.includes('cat-sultan') || 
+      (match as any)?.categoryId === 'cat-sultan' ||
       match?.type === 'Iframe' || 
-      (match as any)?.isSultan ||
+      (match as any)?.isSultan === true ||
       currentLinkData?.type === 'Iframe' || 
-      currentLinkData?.isSultan ||
-      cleanStreamUrl.includes('.html') || 
-      cleanStreamUrl.includes('.php') ||
-      cleanStreamUrl.includes('embed');
+      currentLinkData?.isSultan === true ||
+      rawStreamUrl.includes('.html') || 
+      rawStreamUrl.includes('.php') ||
+      rawStreamUrl.includes('embed');
 
   const finalStreamUrl = useProxy && !isStrictIframe && cleanStreamUrl.startsWith('http') 
-    ? `https://corsproxy.io/?${encodeURIComponent(cleanStreamUrl)}` 
+    ? `${CF_PROXY}${encodeURIComponent(cleanStreamUrl)}` 
     : cleanStreamUrl;
 
   useEffect(() => {
@@ -110,12 +114,12 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
   const generatePlayerHtml = (engine: EngineType, url: string) => {
     const errorSpy = `<script>function sendErr() { window.parent.postMessage({action: 'STREAM_ERROR'}, '*'); }</script>`;
     
-    // 🔥 EXACT PLYR SCRIPT PROVIDED BY USER
+    // PLYR ENGINE WITH CLOUDFLARE PROXY INTEGRATION
     if (engine === 'plyr') return `<!DOCTYPE html><html><head>
         <meta charset="UTF-8">
         <link rel="stylesheet" href="https://cdn.plyr.io/3.5.6/plyr.css">
         <style>
-            body { background: #111; margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; }
+            body { background: #000; margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; }
             .plyr { height: 100%; width: 100%; }
         </style>
     </head><body>
@@ -126,26 +130,35 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
         <script>
             const video = document.getElementById("player");
             const streamUrl = '${url}';
+            const myProxy = '${CF_PROXY}';
             
             try {
                 let player = new Plyr(video, { autoplay: true });
                 
                 if (Hls.isSupported() && streamUrl.includes('.m3u8')) {
-                    const hls = new Hls();
+                    const hls = new Hls({
+                        xhrSetup: function(xhr, requestUrl) {
+                            if (requestUrl.startsWith('http://')) {
+                                requestUrl = myProxy + encodeURIComponent(requestUrl);
+                            }
+                            xhr.open('GET', requestUrl, true);
+                        }
+                    });
+                    
                     hls.loadSource(streamUrl);
                     hls.attachMedia(video);
-                    hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                        video.play().catch(e => console.log("Autoplay blocked", e));
-                    });
+                    
                     hls.on(Hls.Events.ERROR, function(e, data) {
                         if(data.fatal) {
-                            if(data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-                            else sendErr();
+                            if(data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                                hls.startLoad();
+                            } else {
+                                sendErr();
+                            }
                         }
                     });
                 } else {
                     video.src = streamUrl;
-                    video.play().catch(e => console.log("Autoplay blocked", e));
                 }
             } catch(e) {
                 sendErr();
@@ -153,14 +166,16 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
         </script>
     </body></html>`;
 
+    // SUPER PROXY ENGINE USING YOUR NEW WORKER
     if (engine === 'super-proxy') return `<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script><style>body{margin:0;background:#000;overflow:hidden;} video{width:100%;height:100vh;outline:none;}</style></head><body><video id="hls-video" controls autoplay playsinline></video>${errorSpy}<script>
         if(Hls.isSupported()){
             var video=document.getElementById('hls-video');
+            var myProxy = '${CF_PROXY}';
             var hls=new Hls({
                 maxBufferLength: 30,
                 xhrSetup: function(xhr, requestUrl) {
                     if (requestUrl.startsWith('http://')) {
-                        requestUrl = 'https://corsproxy.io/?' + encodeURIComponent(requestUrl);
+                        requestUrl = myProxy + encodeURIComponent(requestUrl);
                     }
                     xhr.open('GET', requestUrl, true);
                 }
@@ -236,8 +251,18 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
     video.addEventListener('playing', handleSuccess);
     video.addEventListener('loadeddata', handleSuccess);
 
+    // NATIVE ENGINE WITH CLOUDFLARE PROXY INTEGRATION
     if (Hls.isSupported() && finalStreamUrl.includes('.m3u8')) {
-      const hls = new Hls({ maxMaxBufferLength: 30, liveSyncDurationCount: 3 });
+      const hls = new Hls({ 
+          maxMaxBufferLength: 30, 
+          liveSyncDurationCount: 3,
+          xhrSetup: function(xhr, requestUrl) {
+              if (requestUrl.startsWith('http://')) {
+                  requestUrl = CF_PROXY + encodeURIComponent(requestUrl);
+              }
+              xhr.open('GET', requestUrl, true);
+          }
+      });
       hlsRef.current = hls;
       
       hls.loadSource(finalStreamUrl); 
@@ -432,8 +457,8 @@ const PlayerView: React.FC<PlayerViewProps> = ({ match, onBack, relatedChannels,
                   <button onClick={onBack} className="p-2 bg-black/50 rounded-full hover:bg-[#00b865] transition pointer-events-auto"><ArrowLeft className="w-6 h-6 text-white" /></button>
                 </div>
                 <iframe 
-                    key={`iframe-${cleanStreamUrl}`}
-                    src={cleanStreamUrl} 
+                    key={`iframe-${rawStreamUrl}`}
+                    src={rawStreamUrl} 
                     className="w-full h-full border-none absolute inset-0 z-10 bg-black" 
                     allow="autoplay; fullscreen; encrypted-media; picture-in-picture; display-capture; web-share" 
                     allowFullScreen 
